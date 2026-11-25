@@ -4,7 +4,7 @@
 
 # Memo
 
-**Local memory for agents that pick up where they left off.**
+**Local memory for AI agents — built for PPC and marketing teams.**
 
 A standalone CLI journal with a progressive-compression overview.
 
@@ -17,13 +17,13 @@ A standalone CLI journal with a progressive-compression overview.
 
 ---
 
-Every session starts from scratch. A chat transcript is too long to reread; the last few messages lose everything older. Memo gives each of your agents a small journal in its own folder and one command — `memo wake` — that shows the whole history in a few lines: **old material compressed, recent material verbatim, nothing deleted.**
+Your ads agents manage live campaigns across sessions: budget moves, bid-strategy reverts, creative approvals, sync tags, open QA items. Every new session starts from scratch — the transcript is too long to reread, and the last few messages lose everything older. Memo gives each agent a small journal in its own folder and one command — `memo wake` — that shows the whole history in a few lines: **old material compressed, recent material verbatim, nothing deleted.**
 
 No daemon, no IDE plugin, no external service. One file of Python from the standard library.
 
 ## The one command that matters
 
-`memo wake` on a journal with 113 entries prints 32 lines and covers *all* of them:
+`memo wake` on an ads agent's journal with 113 entries prints 32 lines and covers *all* of them:
 
 ```text
 Today is 2026-11-25.
@@ -64,6 +64,26 @@ You are awake.
 
 Older stretches appear as one-line summaries of 2, 4, 8, 16… entries; the newest entries appear verbatim. Every entry is covered exactly once — no gaps, no overlaps — and nothing is ever deleted.
 
+## For PPC teams running agents
+
+One journal per agent, one folder per channel — Google Ads, Meta, ChatGPT Ads, Reddit Ads each keep their own, so spend, decisions and blockers never mix:
+
+```text
+team/
+├── google-ads/   └── .memo/   budget & bidding decisions, QA evidence
+├── meta-ads/     └── .memo/   creative approvals, catalog work
+├── reddit-ads/   └── .memo/   campaign windows, caps, day-boundary reads
+└── content/      └── .memo/   page fixes, deploy approvals
+```
+
+The loop that makes it work:
+
+1. **`memo wake`** at session start — the agent sees what changed, what's binding (deploy-after-approval rules, owner decisions) and what's still open (pixel QA).
+2. **`memo note`** after each confirmed change — budget moves, bid reverts, promo-code removals, with the numbers. One line, no session bloat.
+3. **`memo recall`** when the question is "what did we decide about promo codes?" — regex, typo-tolerant and optional semantic search over the originals, with later corrections shown under the hits.
+
+Because agents write plain, dated lines as they work, week-old context costs one summary line — and your team can audit exactly what the agent believed when it acted. It runs on the same box as your agents, next to your campaign data, with no service to operate.
+
 ## How it works
 
 1. **`memo note`** appends one short line (≤ 280 bytes): a change, a decision, a blocker, a lesson. Duplicates are detected under the same lock as the write, so parallel sessions can't double-record.
@@ -85,7 +105,7 @@ Corrections are appends too: `memo amend <id>` and `memo retract <id>` add entri
 Requires Python 3.9+ on macOS or Linux. Core commands use only the standard library.
 
 ```sh
-git clone https://github.com/<you>/memo && cd memo
+git clone https://github.com/kubaivanov/memo.git && cd memo
 export PATH="$PWD/bin:$PATH"
 
 # Try it in a dedicated, empty agent folder:
