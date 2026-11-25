@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">Memo — three stacked notes</title>
+  <rect width="128" height="128" rx="28" fill="#f5f0e5"/>
+  <path d="M39 32v-2a8 8 0 0 1 8-8h47a8 8 0 0 1 8 8v37" fill="none" stroke="#3b6658" stroke-width="6" stroke-linecap="round"/>
+  <path d="M29 46v-2a8 8 0 0 1 8-8h47a8 8 0 0 1 8 8v37" fill="none" stroke="#3b6658" stroke-width="6" stroke-linecap="round"/>
+  <rect x="19" y="50" width="63" height="55" rx="10" fill="#173d33"/>
+  <path d="M33 65h35M33 77h27M33 89h15" fill="none" stroke="#f5f0e5" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="99" cy="98" r="6" fill="#c66743"/>
+</svg>

@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+"""Memo: a local journal with a multiresolution view of its history."""
+
+import argparse
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
+from difflib import SequenceMatcher
+import fcntl
+import json
+import math
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+import unicodedata
+
+
+MAX_BYTES = 280
+WAKE_ROWS = 32
+PAGE_BYTES = 20_000
+RAW_BLOCK = 16
+MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+TAGS = {"change", "decision", "blocker", "testing"}
+REFERENCE = re.compile(r"^(Amends|Retracts) #(\d+)(?:-(\d+))?: ")
+
+
+def root(cwd):
+    for folder in (cwd, *cwd.parents):
+        store = folder / ".memo"
+        if store.exists() or store.is_symlink():
+            if not store.is_dir() or store.is_symlink():
+                raise ValueError(f"expected a real directory: {store}")
+            return store
+    return None
+
+
+@contextmanager
+def lock(store):
+    with (store / ".lock").open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def atomic_json(path, value):
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                     dir=path.parent, delete=False) as handle:
+        stage = Path(handle.name)
+        try:
+            json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.replace(stage, path)
+        finally:
+            stage.unlink(missing_ok=True)
+
+
+def read_entries(store):
+    with (store / "entries.jsonl").open(encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle]
+
+
+def check(text):
+    text = text.strip()
+    if not text or len(text.splitlines()) != 1 or len(text.encode()) > MAX_BYTES:
+        raise ValueError(f"expected one nonempty line of at most {MAX_BYTES} UTF-8 bytes")
+    if any(unicodedata.category(c) == "Cc" for c in text):
+        raise ValueError("control characters are not allowed")
+    return text
+
+
+def append(store, entries, stamp, text):
+    entry = {"id": len(entries), "date": stamp, "text": text}
+    with (store / "entries.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    entries.append(entry)
+    print(f"Saved as #{entry['id']}.")
+
+
+def display(entry):
+    return "#{id} {date} {text}".format(**entry)
+
+
+def block_name(block):
+    start, size = block
+    return f"{start}-{start + size - 1}"
+
+
+def block_id(value):
+    match = re.fullmatch(r"#?(\d+)-#?(\d+)", value)
+    if not match:
+        raise ValueError("expected a block range such as 0-15")
+    start, end = map(int, match.groups())
+    size = end - start + 1
+    if size < 2 or size & (size - 1) or start % size:
+        raise ValueError("expected an aligned block of 2, 4, 8, … entries")
+    return start, size
+
+
+def halves(block):
+    start, size = block
+    step = size // 2
+    return (start, step), (start + step, step)
+
+
+def view(count):
+    """Cover the prefix once, refining detail preferentially near the tail."""
+    blocks = []
+    start = 0
+    while start < count:
+        size = 1 << ((count - start).bit_length() - 1)
+        blocks.append((start, size))
+        start += size
+    while len(blocks) < WAKE_ROWS:
+        choices = [(size / (count - start), start, i)
+                   for i, (start, size) in enumerate(blocks) if size > 1]
+        if not choices:
+            break
+        _, _, index = max(choices)
+        blocks[index:index + 1] = halves(blocks[index])
+    return blocks
+
+
+def summary_path(store, block):
+    return store / "summaries" / f"{block_name(block)}.json"
+
+
+def summary(store, block):
+    path = summary_path(store, block)
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def pending(store, count):
+    def visit(block):
+        if block[1] == 1 or summary(store, block) is not None:
+            return
+        if block[1] > RAW_BLOCK:
+            for half in halves(block):
+                yield from visit(half)
+        yield block
+
+    return [item for block in view(count) for item in visit(block)]
+
+
+def request_summary(store, entries, jobs):
+    if not jobs:
+        return
+    start, size = block = jobs[0]
+    name = block_name(block)
+    print(f"Compress #{name} into one line of at most {MAX_BYTES} UTF-8 bytes.")
+    print("Keep what has lasting effect, drop what does not. Invent nothing.")
+    if size <= RAW_BLOCK:
+        for entry in entries[start:start + size]:
+            print("  " + display(entry))
+    else:
+        for half in halves(block):
+            print(f"  #{block_name(half)} {summary(store, half)}")
+    print(f'Run: memo compress {name} "<your summary>"')
+
+
+def wake(store, entries, args):
+    count = len(entries) if args.snapshot is None else args.snapshot
+    if not 0 <= count <= len(entries):
+        raise ValueError("snapshot is outside the journal")
+    jobs = pending(store, count)
+    if jobs:
+        print(f"Cannot wake: {len(jobs)} summary block(s) needed.")
+        request_summary(store, entries, jobs)
+        return 1
+    pages, used = [[]], 0
+    for start, size in view(count):
+        block = (start, size)
+        row = (display(entries[start]) if size == 1 else
+               f"#{block_name(block)} {summary(store, block)}")
+        width = len(row.encode()) + 1
+        if pages[-1] and used + width > PAGE_BYTES:
+            pages.append([])
+            used = 0
+        pages[-1].append(row)
+        used += width
+    if not 1 <= args.part <= len(pages):
+        raise ValueError("no such page; run memo wake")
+    if args.part == 1:
+        print(f"Today is {date.today():%Y-%m-%d}.")
+        if not count:
+            print("No memories yet.")
+    for row in pages[args.part - 1]:
+        print(row)
+    if args.part < len(pages):
+        print(f"Not awake yet. Run: memo wake {args.part + 1} {count}")
+    else:
+        print("You are awake.")
+    return 0
+
+
+def references(entries, ranges):
+    for entry in entries:
+        match = REFERENCE.match(entry["text"])
+        if match:
+            lo = int(match[2])
+            hi = int(match[3] or match[2])
+            if any(max(lo, start) <= min(hi, end, entry["id"] - 1)
+                   for start, end in ranges):
+                yield entry
+
+
+def folded(text):
+    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold())
+                   if not unicodedata.combining(c))
+
+
+def embed(texts):
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        raise ValueError("semantic search requires: python3 -m pip install sentence-transformers")
+    # Model weights may be downloaded on first use; journal text is encoded locally.
+    return SentenceTransformer(MODEL).encode(texts, normalize_embeddings=True).tolist()
+
+
+def read_index(store):
+    path = store / "index.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def when(value):
+    if value == "today":
+        return date.today().isoformat()
+    if value == "yesterday":
+        return (date.today() - timedelta(days=1)).isoformat()
+    relative = re.fullmatch(r"(\d+)([hdw])", value)
+    if relative:
+        n, unit = relative.groups()
+        return (datetime.now() - timedelta(
+            hours=int(n) * {"h": 1, "d": 24, "w": 168}[unit])).isoformat(timespec="minutes")
+    return value
+
+
+def recall(store, entries, args):
+    since, until = (when(v) if v else None for v in (args.since or args.on, args.until or args.on))
+    candidates = [entry for entry in entries
+                  if (not args.subject or entry["text"].casefold().startswith(
+                      f"[{args.subject}] ".casefold()))
+                  and (not since or entry["date"][:len(since)] >= since)
+                  and (not until or entry["date"][:len(until)] <= until)]
+    warning = None
+    if args.semantic:
+        vectors = read_index(store)
+        if not vectors:
+            raise ValueError("no semantic index; run memo index")
+        missing = len(entries) - len(vectors)
+        if missing:
+            warning = f"{missing} entries newer than the index; run memo index."
+        candidates = [entry for entry in candidates if entry["id"] < len(vectors)]
+        if candidates:
+            query = embed([args.query])[0]
+            candidates.sort(key=lambda e: (
+                math.fsum(a * b for a, b in zip(query, vectors[e["id"]])), e["id"]),
+                reverse=True)
+    elif args.fuzzy:
+        needle = folded(args.query)
+        def score(entry):
+            text = folded(entry["text"])
+            if needle in text:
+                return 1.0
+            words = text.split()
+            widths = max(1, len(needle.split()))
+            return max((SequenceMatcher(None, needle, " ".join(words[i:i + widths])).ratio()
+                        for i in range(len(words))), default=0)
+        matches = [(score(entry), entry) for entry in candidates]
+        candidates = [entry for value, entry in sorted(
+            matches, key=lambda item: (item[0], item[1]["id"]), reverse=True)
+            if value >= 0.6]
+    else:
+        pattern = re.compile(args.query, re.IGNORECASE)
+        candidates = sorted((e for e in candidates if pattern.search(e["text"])),
+                            key=lambda e: (e["date"], e["id"]), reverse=True)
+    shown = candidates[:args.limit]
+    for entry in shown:
+        print(display(entry))
+    print(f"{len(candidates)} matches." if candidates else "No match.")
+    later = list(references(entries, [(e["id"], e["id"]) for e in shown]))
+    if later:
+        print("Later corrections / retractions:")
+        for entry in later[-8:]:
+            print("  " + display(entry))
+    if warning:
+        print(warning)
+
+
+def parser():
+    cli = argparse.ArgumentParser(description=__doc__)
+    commands = cli.add_subparsers(dest="command", required=True)
+    commands.add_parser("init", help="create a local journal")
+    p = commands.add_parser("wake", help="read the progressively compressed overview")
+    p.add_argument("part", nargs="?", type=int, default=1)
+    p.add_argument("snapshot", nargs="?", type=int)
+    p = commands.add_parser("note", help="append a short memory")
+    p.add_argument("text")
+    p.add_argument("--subject")
+    p.add_argument("--tag")
+    p.add_argument("--date")
+    p.add_argument("--force", action="store_true")
+    p = commands.add_parser("compress", help="show or settle the next summary")
+    p.add_argument("range", nargs="?")
+    p.add_argument("text", nargs="?")
+    p = commands.add_parser("recall", help="search original entries")
+    p.add_argument("query", nargs="?", default="")
+    p.add_argument("-n", "--limit", type=int, default=20)
+    p.add_argument("--subject")
+    p.add_argument("--since")
+    p.add_argument("--until")
+    p.add_argument("--on")
+    modes = p.add_mutually_exclusive_group()
+    modes.add_argument("--semantic", action="store_true")
+    modes.add_argument("--fuzzy", action="store_true")
+    for name in ("show", "amend", "retract", "expand", "drop-summary"):
+        p = commands.add_parser(name)
+        p.add_argument("target")
+        if name in ("amend", "retract"):
+            p.add_argument("text")
+    p = commands.add_parser("index", help="update the optional semantic index")
+    modes = p.add_mutually_exclusive_group()
+    modes.add_argument("--status", action="store_true")
+    modes.add_argument("--rebuild", action="store_true")
+    commands.add_parser("status")
+    p = commands.add_parser("tags")
+    p.add_argument("--add")
+    return cli
+
+
+def run(args):
+    cwd = Path.cwd().resolve()
+    store = root(cwd)
+    cmd = args.command
+    if cmd == "init":
+        if store is not None and store.parent != cwd:
+            raise ValueError(f"this folder already belongs to {store.parent}")
+        store = cwd / ".memo"
+        store.mkdir(mode=0o700, exist_ok=True)
+        with lock(store):
+            if (store / "entries.txt").exists() or (store / "LOG.txt").exists():
+                raise ValueError("legacy journal found; use a new folder until it can be migrated")
+            (store / "summaries").mkdir(exist_ok=True)
+            (store / "entries.jsonl").touch(exist_ok=True)
+        print(f"Journal: {store}")
+        return 0
+    if store is None:
+        raise ValueError("no journal here; run memo init in the agent folder")
+    # All reads and writes use a consistent journal snapshot. Index inference
+    # releases the lock so it cannot hold up ordinary writes.
+    with lock(store):
+        entries = read_entries(store)
+        if cmd != "index":
+            return operate(store, entries, args)
+        vectors = [] if args.rebuild else (read_index(store) or [])
+    if args.status:
+        print(f"Indexed {len(vectors)}/{len(entries)} entries.")
+        return 0
+    missing = entries[len(vectors):]
+    if missing:
+        vectors += embed([e["text"] for e in missing])
+        with lock(store):
+            current = read_index(store) or []
+            if len(vectors) >= len(current):
+                atomic_json(store / "index.json", vectors)
+            else:
+                vectors = current
+    print(f"Indexed {len(vectors)}/{len(entries)} entries (start-of-command snapshot).")
+    return 0
+
+
+def operate(store, entries, args):
+    cmd = args.command
+    if cmd == "wake":
+        return wake(store, entries, args)
+    if cmd == "note":
+        tag = args.tag.casefold() if args.tag else None
+        if tag and tag not in available_tags(store) and not args.force:
+            raise ValueError(f"unknown tag: {tag}; see memo tags")
+        subject = f"[{args.subject}] " if args.subject else ""
+        stamp = args.date or date.today().isoformat()
+        datetime.fromisoformat(stamp)
+        text = check(subject + (f"{tag}: " if tag else "") + check(args.text))
+        for entry in reversed(entries):
+            if not args.force and entry["text"] == text and (
+                    not args.date or entry["date"] == stamp):
+                print(f"Already recorded as #{entry['id']}. Use --force to record it again.")
+                return 0
+        append(store, entries, stamp, text)
+        request_summary(store, entries, pending(store, len(entries)))
+    elif cmd == "compress":
+        jobs = pending(store, len(entries))
+        if args.range is not None or args.text is not None:
+            if not args.range or not args.text:
+                raise ValueError('expected: memo compress <range> "<summary>"')
+            target = block_id(args.range)
+            if summary(store, target) is not None:
+                print(f"#{block_name(target)} is already summarized.")
+            elif not jobs or target != jobs[0]:
+                raise ValueError("not the next pending block; run memo compress")
+            else:
+                atomic_json(summary_path(store, target), check(args.text))
+                print(f"#{block_name(target)} saved.")
+            jobs = pending(store, len(entries))
+        if jobs:
+            request_summary(store, entries, jobs)
+        else:
+            print("Nothing left to compress.")
+    elif cmd == "recall":
+        if args.limit < 1 or ((args.semantic or args.fuzzy) and not args.query):
+            raise ValueError("use a positive result limit and a nonempty fuzzy/semantic query")
+        recall(store, entries, args)
+    elif cmd == "status":
+        print(f"Journal: {store}\nEntries: {len(entries)}")
+        print(f"Pending summaries: {len(pending(store, len(entries)))}")
+        print(f"Indexed: {len(read_index(store) or [])}/{len(entries)}")
+    elif cmd == "tags":
+        tags = available_tags(store)
+        if args.add:
+            name = args.add.split(":", 1)[0].strip().casefold()
+            if not re.fullmatch(r"[a-z][a-z0-9_-]*", name):
+                raise ValueError("tags must start with a lowercase letter")
+            tags.add(name)
+            atomic_json(store / "tags.json", sorted(tags - TAGS))
+        print("\n".join(sorted(tags)))
+    else:
+        if "-" in args.target:
+            start, size = block_id(args.target)
+        else:
+            start, size = int(args.target.lstrip("#")), 1
+        end = start + size - 1
+        if not 0 <= start <= end < len(entries):
+            raise ValueError("target is outside the journal")
+        name = str(start) if size == 1 else block_name((start, size))
+        if cmd == "show":
+            print(display(entries[start]) if size == 1 else
+                  f"#{name} {summary(store, (start, size)) or '(not summarized)'}")
+            for entry in references(entries, [(start, end)]):
+                print("  " + display(entry))
+        elif cmd in ("amend", "retract"):
+            verb = "Amends" if cmd == "amend" else "Retracts"
+            append(store, entries, date.today().isoformat(), check(f"{verb} #{name}: {args.text}"))
+            request_summary(store, entries, pending(store, len(entries)))
+        elif size == 1:
+            raise ValueError("expected a block range")
+        elif cmd == "expand":
+            for half in halves((start, size)):
+                text = summary(store, half) if half[1] > 1 else None
+                if text:
+                    print(f"#{block_name(half)} {text}")
+                else:
+                    for entry in entries[half[0]:half[0] + half[1]]:
+                        print(display(entry))
+        elif cmd == "drop-summary":
+            for path in (store / "summaries").glob("*.json"):
+                lo, length = block_id(path.stem)
+                if lo <= start and end < lo + length:
+                    path.unlink()
+            print(f"Dropped #{name} and enclosing summaries; entries unchanged.")
+    return 0
+
+
+def available_tags(store):
+    path = store / "tags.json"
+    return TAGS | (set(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else set())
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(run(parser().parse_args()))
+    except (OSError, ValueError, re.error) as error:
+        print(f"memo: {error}", file=sys.stderr)
+        sys.exit(1)
