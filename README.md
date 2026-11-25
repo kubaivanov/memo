@@ -173,4 +173,4 @@ The journal-and-compression model is inspired by [OptMem by Victor Taelin](https
 
 ## License
 
-TBD — to be decided before the first public release.
+[MIT](LICENSE) — free to use, modify and redistribute.
