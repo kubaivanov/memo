@@ -203,15 +203,15 @@ Default journal tags: `change`, `decision`, `blocker`, `testing`. Size limits (`
 python3 -m pip install sentence-transformers
 ```
 
-After that, **the index takes care of itself**: `memo memory note` embeds new entries as they are written, and any `recall --semantic` builds or extends the index before searching — first use pays the one-time build. Regex and fuzzy search work without the model; when the library is missing, the journal simply skips indexing and nothing fails. The explicit `index` commands remain for pre-building and `--status` / `--rebuild`.
+After that, **the index takes care of itself**: `memo memory note` returns immediately — a short-lived background run embeds the new entry, so writes never wait for a model. Any `recall --semantic` completes the index synchronously before searching; only the first search after the install pays the full build. The explicit `index` commands remain for pre-building and `--status` / `--rebuild`.
 
-Encodes text locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights may download on first use). The knowledge index is built **per chunk**: each title-prefixed paragraph of a card gets its own vector, so a hit points at the paragraph that matched — and bodies longer than the model window still work.
+Without the library, journals simply skip indexing and nothing fails; regex and fuzzy search need no model. Encodes text locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights may download on first use). The knowledge index is built **per chunk**: each title-prefixed paragraph of a card gets its own vector, so a hit points at the paragraph that matched — and bodies longer than the model window still work.
 
 ## Design guarantees
 
 - **Append-only journals.** Entries and corrections are appended, never edited. Summaries are derived data; dropping one never touches an entry.
 - **Read-only towards the vault.** Knowledge commands never modify a card; the only write is the rebuildable `.knowledge/index.json`.
-- **Folder-scoped.** Each agent folder has one journal; subfolders resolve to the same one. No global state, no server, no background process.
+- **Folder-scoped.** Each agent folder has one journal; subfolders resolve to the same one. No global state, no server, no resident process — a note's indexing is a short-lived detached child that exits when done.
 - **Stdout contract.** Outputs are written for agent consumption: explicit next actions, stable `#id` / card-name references, no noise.
 - **Standard library only** for the core. One `fcntl` lock guards concurrent access to a journal; that pins the supported platforms to macOS and Linux.
 

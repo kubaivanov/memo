@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -107,7 +108,7 @@ class MemoTests(unittest.TestCase):
                       self.call("memory", "recall", "--semantic", "test", code=1))
 
     def test_journal_note_auto_indexes(self):
-        stub = {"MEMO_EMBED_STUB": "1"}
+        stub = {"MEMO_EMBED_STUB": "1", "MEMO_SYNC_INDEX": "1"}
         self.call("memory", "note", "deployed budget 500", env=stub)
         self.assertIn("Indexed 1/1", self.call("memory", "index", "--status", env=stub))
         self.assertIn("Indexed 1 new; index current.",
@@ -117,6 +118,16 @@ class MemoTests(unittest.TestCase):
         out = self.call("memory", "recall", "--semantic", "budget", env=stub)
         self.assertIn("Indexed 2 entries; index current.", out)
         self.assertIn("deployed budget 500", out)
+
+    def test_journal_note_index_runs_in_background(self):
+        stub = {"MEMO_EMBED_STUB": "1"}
+        out = self.call("memory", "note", "nightly sync done", env=stub)
+        self.assertNotIn("Indexed", out)          # the write never waits
+        deadline, status = time.time() + 10, ""
+        while time.time() < deadline and "Indexed 1/1" not in status:
+            time.sleep(0.05)
+            status = self.call("memory", "index", "--status", env=stub)
+        self.assertIn("Indexed 1/1", status)      # the child catches up
 
 
 class KnowledgeTests(unittest.TestCase):

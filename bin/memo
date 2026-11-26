@@ -25,6 +25,7 @@ import math
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 import unicodedata
@@ -285,6 +286,21 @@ def extend_index(store, entries):
     return len(missing)
 
 
+def index_async():
+    """Hand new-entry indexing to a short-lived background run of
+    `memo memory index`; embedding there happens without holding the
+    lock, so notes never wait for a model. A note must never fail
+    because of this — if the child cannot spawn, the index catches up
+    at the next `recall --semantic`."""
+    try:
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "memory", "index"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        pass
+
+
 def recall(store, entries, args):
     since, until = (when(v) if v else None for v in (args.since or args.on, args.until or args.on))
     candidates = [entry for entry in entries
@@ -402,13 +418,16 @@ def journal_operate(store, entries, args):
                 return 0
         append(store, entries, stamp, text)
         request_summary(store, entries, pending(store, len(entries)))
-        try:
-            fresh = extend_index(store, entries)
-            if fresh:
-                print(f"Indexed {fresh} new; index current.")
-        except ValueError:
-            if read_index(store) is not None:
-                print("Index not refreshed: semantic deps missing.")
+        if os.environ.get("MEMO_SYNC_INDEX"):
+            try:
+                fresh = extend_index(store, entries)
+                if fresh:
+                    print(f"Indexed {fresh} new; index current.")
+            except ValueError:
+                if read_index(store) is not None:
+                    print("Index not refreshed: semantic deps missing.")
+        else:
+            index_async()
     elif cmd == "compress":
         jobs = pending(store, len(entries))
         if args.range is not None or args.text is not None:
