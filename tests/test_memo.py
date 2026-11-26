@@ -102,10 +102,18 @@ class MemoTests(unittest.TestCase):
                       self.call("memory", "note", "--subject", "test", "ě" * 140, code=1))
 
     def test_journal_semantic_without_library(self):
-        self.call("memory", "note", "test")
-        self.assertIn("Indexed 0/1", self.call("memory", "index", "--status"))
+        # force the "library missing" path even when sentence-transformers
+        # happens to be installed on this machine
+        blocker = self.bot / "no-semantic"
+        blocker.mkdir(exist_ok=True)
+        (blocker / "sentence_transformers.py").write_text(
+            "raise ImportError('blocked for this test')\n", encoding="utf-8")
+        env = {"PYTHONPATH": str(blocker)}
+        self.call("memory", "note", "test", env=env)
+        self.assertIn("Indexed 0/1", self.call("memory", "index", "--status", env=env))
         self.assertIn("semantic search requires",
-                      self.call("memory", "recall", "--semantic", "test", code=1))
+                      self.call("memory", "recall", "--semantic", "test",
+                                env=env, code=1))
 
     def test_journal_note_auto_indexes(self):
         stub = {"MEMO_EMBED_STUB": "1", "MEMO_SYNC_INDEX": "1"}
