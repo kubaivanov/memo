@@ -6,24 +6,24 @@
 
 **Local memory for AI agents — built for PPC and marketing teams.**
 
-A standalone CLI journal with a progressive-compression overview.
+A journal that compresses itself, and a brief over what your field knows.
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776ab?logo=python&logoColor=white)](https://www.python.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)](#)
 [![Deps](https://img.shields.io/badge/deps-stdlib%20only-2f9e44)](#design-guarantees)
-[![Tests](https://img.shields.io/badge/tests-6%2F6-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-11%2F11-brightgreen)](#development)
 
 </div>
 
 ---
 
-Your ads agents manage live campaigns across sessions: budget moves, bid-strategy reverts, creative approvals, sync tags, open QA items. Every new session starts from scratch — the transcript is too long to reread, and the last few messages lose everything older. Memo gives each agent a small journal in its own folder and one command — `memo wake` — that shows the whole history in a few lines: **old material compressed, recent material verbatim, nothing deleted.**
+Your ads agents manage live campaigns across sessions: budget moves, bid-strategy reverts, creative approvals, sync tags, open QA items. Every new session starts from scratch — the transcript is too long to reread, and the last few messages lose everything older. Memo gives each agent two things in its own folder: **`memo memory wake`** shows its whole history in a few lines — old material compressed, recent material verbatim, nothing deleted — and **`memo knowledge wake`** briefs its field from a vault of note cards.
 
 No daemon, no IDE plugin, no external service. One file of Python from the standard library.
 
-## The one command that matters
+## Memory: the one command that matters
 
-`memo wake` on an ads agent's journal with 113 entries prints 32 lines and covers *all* of them:
+`memo memory wake` on an ads agent's journal with 113 entries prints 32 lines and covers *all* of them:
 
 ```text
 Today is 2026-11-25.
@@ -32,7 +32,7 @@ Today is 2026-11-25.
 #24-31  GTM v3 live: init and consent in one tag; autocapture on; tests 7/7.
 #32-39  GTM v4 in production; single PostHog tag on gtm.init.
 #40-47  Quiet week: backups, reports and routine checks; nothing blocking.
-#48-55  Partner logo prep; tools-page copy drafts; weekly checks.
+#48-55  Partner logo prep; tools copy drafts; weekly checks.
 #56-63  Mobile audit branch opened; contrast and skip-link fixes staged.
 #64-67  Promo copy removed from all ad bodies per owner decision.
 #68-71  Budget $100 → $200 after tCPA throttled delivery.
@@ -64,31 +64,11 @@ You are awake.
 
 Older stretches appear as one-line summaries of 2, 4, 8, 16… entries; the newest entries appear verbatim. Every entry is covered exactly once — no gaps, no overlaps — and nothing is ever deleted.
 
-## For PPC teams running agents
+## How memory works
 
-One journal per agent, one folder per channel — Google Ads, Meta, ChatGPT Ads, Reddit Ads each keep their own, so spend, decisions and blockers never mix:
-
-```text
-team/
-├── google-ads/   └── .memo/   budget & bidding decisions, QA evidence
-├── meta-ads/     └── .memo/   creative approvals, catalog work
-├── reddit-ads/   └── .memo/   campaign windows, caps, day-boundary reads
-└── content/      └── .memo/   page fixes, deploy approvals
-```
-
-The loop that makes it work:
-
-1. **`memo wake`** at session start — the agent sees what changed, what's binding (deploy-after-approval rules, owner decisions) and what's still open (pixel QA).
-2. **`memo note`** after each confirmed change — budget moves, bid reverts, promo-code removals, with the numbers. One line, no session bloat.
-3. **`memo recall`** when the question is "what did we decide about promo codes?" — regex, typo-tolerant and optional semantic search over the originals, with later corrections shown under the hits.
-
-Because agents write plain, dated lines as they work, week-old context costs one summary line — and your team can audit exactly what the agent believed when it acted. It runs on the same box as your agents, next to your campaign data, with no service to operate.
-
-## How it works
-
-1. **`memo note`** appends one short line (≤ 280 bytes): a change, a decision, a blocker, a lesson. Duplicates are detected under the same lock as the write, so parallel sessions can't double-record.
-2. **`memo compress`** stores one-line summaries for aligned blocks. Blocks up to 16 entries are summarized from the originals; larger blocks are built from two smaller summaries. Your agent writes the summary — Memo never calls a model behind your back.
-3. **`memo wake`** selects whole blocks to fit ~32 lines and prints them. If a required summary is missing, it prints the next compression job with its inputs and asks for it, then you re-run `wake`.
+1. **`memo memory note`** appends one short line (≤ 280 bytes): a change, a decision, a blocker, a lesson. Duplicates are detected under the same lock as the write, so parallel sessions can't double-record.
+2. **`memo memory compress`** stores one-line summaries for aligned blocks. Blocks up to 16 entries are summarized from the originals; larger blocks are built from two smaller summaries. Your agent writes the summary — Memo never calls a model behind your back.
+3. **`memo memory wake`** selects whole blocks to fit ~32 lines and prints them. If a required summary is missing, it prints the next compression job with its inputs and asks for it, then you re-run `wake`.
 
 ```text
 agent/
@@ -98,7 +78,59 @@ agent/
     └── index.json      optional semantic-search vectors
 ```
 
-Corrections are appends too: `memo amend <id>` and `memo retract <id>` add entries that reference what they correct. The history is never edited. `memo recall` shows later corrections under the hits it returns.
+Corrections are appends too: `memo memory amend <id>` and `memo memory retract <id>` add entries that reference what they correct. The history is never edited. `memo memory recall` shows later corrections under the hits it returns.
+
+## Knowledge: a brief of the field
+
+A knowledge vault is any folder of note cards with `sources/` and `topics/` — an Obsidian vault works as-is. Cards carry YAML frontmatter (`title`, `status: new|read|used`, `captured`, `topics`); topics are quoted wikilinks (`"[[ppc]]"`) pointing at router notes.
+
+```text
+memo knowledge wake chatgpt-ads ppc
+```
+
+```text
+Knowledge: ~/0-KNOWLEDGE
+22 sources, 0 ideas, 1 in inbox. Field: chatgpt-ads, ppc — 5 source(s) match.
+Fresh (new): 0
+Ready to use (read): 5
+- openai--chatgpt-ads-increases-its-market-presence...--2026-11-12 (2026-11-18) [chatgpt-ads, ppc, cz, adtech]
+- adexchanger--google-s-ai-ad-losses-are-meta-s-gain...--2026-11-11 (2026-11-11) [ppc, ai-search, chatgpt-ads, adtech, meta-ads]
+Routers: topics/chatgpt-ads.md, topics/ppc.md
+You are briefed.
+```
+
+With no topics, the brief covers the whole vault. The vault is located with `--dir`, the `KNOWLEDGE_DIR` environment variable, or by walking up from the working folder (including `0-KNOWLEDGE` and `knowledge` subfolders). Knowledge commands are read-only towards the vault; the only thing Memo ever writes there is the derived, rebuildable semantic index in `.knowledge/`.
+
+Search the cards by exact words, filters, or meaning:
+
+```sh
+memo knowledge recall "CTR pozice 1" --topic ai-search --status read
+memo knowledge recall --fuzzy "meta analisis"          # typo-tolerant
+memo knowledge index                                    # optional, once
+memo knowledge recall --semantic "what fell after AI Overviews?"
+```
+
+For semantic search the index is built **per chunk**: each title-prefixed paragraph of a card gets its own vector, so a hit points at the paragraph that matched — and bodies longer than the model window still work.
+
+## For PPC teams running agents
+
+One journal per agent, one folder per channel — and one shared vault of what the field knows:
+
+```text
+team/
+├── google-ads/   └── .memo/   journal: budget & bidding decisions, QA evidence
+├── meta-ads/     └── .memo/   journal: creative approvals, catalog work
+├── reddit-ads/   └── .memo/   journal: campaign windows, caps, day-boundary reads
+└── 0-KNOWLEDGE/              vault: source cards, topic routers
+```
+
+The loop that makes it work:
+
+1. **`memo memory wake`** at session start — the agent sees what changed, what's binding and what's still open.
+2. **`memo memory note`** after each confirmed change; **`memo knowledge wake <topics>`** before research, so it starts from what the team already collected instead of re-reading the internet.
+3. **`memo knowledge recall`** when the question is "what do we know about promo codes?" — over your own curated cards, with filters and their exact citations.
+
+Because agents write plain, dated lines as they work, week-old context costs one summary line — and your team can audit exactly what the agent believed when it acted.
 
 ## Quick start
 
@@ -108,51 +140,60 @@ Requires Python 3.9+ on macOS or Linux. Core commands use only the standard libr
 git clone https://github.com/kubaivanov/memo.git && cd memo
 export PATH="$PWD/bin:$PATH"
 
-# Try it in a dedicated, empty agent folder:
+# Memory: try it in a dedicated, empty agent folder.
 mkdir -p ~/demo-agent && cd ~/demo-agent
-memo init
-memo note --subject "website" --tag "decision" "Deploy only after review."
-memo wake
-memo recall "review" -n 5
+memo memory init
+memo memory note --subject "website" --tag "decision" "Deploy only after review."
+memo memory wake
+memo memory recall "review" -n 5
+
+# Knowledge: point it at any folder of cards with sources/ and topics/.
+mkdir -p demo-vault/sources demo-vault/topics
+printf -- '---\ntitle: "Demo"\nstatus: new\ntopics: ["[[ppc]]"]\n---\n\n# Demo\n\nReseller expanded to 44 countries.\n' > demo-vault/sources/demo.md
+printf -- '# PPC\n' > demo-vault/topics/ppc.md
+memo knowledge wake ppc --dir demo-vault
 ```
 
-Runs from a subfolder resolve to the same journal. A minimal drop-in instruction for your agent lives in [`skill/SKILL.md`](skill/SKILL.md).
+Runs from a subfolder resolve to the same journal (and walk up to find a vault). A minimal drop-in instruction for your agent lives in [`skill/SKILL.md`](skill/SKILL.md).
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `memo init` | Create the journal (`.memo/`) for this folder. |
-| `memo wake [part [snapshot]]` | The progressive-compression overview. |
-| `memo note [--subject s] [--tag t] [--date d] "line"` | Append one memory; duplicate-checked. |
-| `memo compress [<range> "<summary>"]` | Show the next compression job, or store a summary. |
-| `memo recall "regex" [-n 20] [--since 7d] [--subject s]` | Search the originals; shows later corrections. |
-| `memo recall --fuzzy "typo toleranr query"` | Typo-tolerant search. |
-| `memo show <id \| lo-hi>` | One entry (or block) plus everything that later referenced it. |
-| `memo amend <id> "correction"` | Append a correction. History is never rewritten. |
-| `memo retract <id> "reason"` | Append a retraction. |
-| `memo expand <lo-hi>` | Open a summary into its two halves. |
-| `memo drop-summary <lo-hi>` | Discard a derived summary (originals stay untouched). |
-| `memo index [--status \| --rebuild]` | Maintain the optional semantic index. |
-| `memo status` / `memo tags [--add "name: what it means"]` | Journal stats / tag vocabulary. |
+| `memo memory init` | Create the journal (`.memo/`) for this folder. |
+| `memo memory wake [part [snapshot]]` | The progressive-compression overview. |
+| `memo memory note [--subject s] [--tag t] [--date d] "line"` | Append one memory; duplicate-checked. |
+| `memo memory compress [<range> "<summary>"]` | Show the next compression job, or store a summary. |
+| `memo memory recall "regex" [-n 20] [--since 7d] [--subject s]` | Search the journal; shows later corrections. |
+| `memo recall --fuzzy` / `--semantic` | Typo-tolerant / meaning-based journal search. |
+| `memo memory show <id \| lo-hi>` | One entry (or block) plus later references. |
+| `memo memory amend <id> "correction"` / `retract <id> "reason"` | Append corrections; history is never rewritten. |
+| `memo memory expand <lo-hi>` / `drop-summary <lo-hi>` | Open a summary into halves / discard a derived summary. |
+| `memo memory index [-status \| --rebuild]` / `status` / `tags` | Optional index, stats, tag vocabulary. |
+| `memo knowledge wake [topics…] [--dir v]` | One field brief from vault frontmatter. |
+| `memo knowledge recall "regex" [--topic t] [--status s] [-n]` | Search cards by words and filters. |
+| `memo knowledge recall --fuzzy "…" / --semantic "…"` | Typo-tolerant / meaning-based card search. |
+| `memo knowledge show <name> [--dir v]` | Print one card: metadata plus body, without the YAML. |
+| `memo knowledge index [-status \| --rebuild] [--dir v]` | Build the chunked semantic index (`.knowledge/`). |
 
-Default tags: `change`, `decision`, `blocker`, `testing`. Size limits (`280` bytes per line, `32` wake rows) are constants at the top of [`bin/memo`](bin/memo).
+Default journal tags: `change`, `decision`, `blocker`, `testing`. Size limits (`280` bytes per line, `32` wake rows) are constants at the top of [`bin/memo`](bin/memo).
 
 ## Optional semantic search
 
 ```sh
 python3 -m pip install sentence-transformers
-memo index
-memo recall --semantic "what did we decide about the launch?"
+memo memory index          # journal entries
+memo knowledge index --dir ~/0-KNOWLEDGE   # knowledge chunks
 ```
 
-Encodes entries locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights may download on first use). `recall` never builds the index as a side effect: if entries are newer than the index, it says so and you run `memo index`. Regex and fuzzy search work without the model — the core tool stays dependency-free.
+Encodes text locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights may download on first use). `recall` never builds an index as a side effect: if data is newer than the index, it says so and you re-index. Regex and fuzzy search work without the model — the core tool stays dependency-free.
 
 ## Design guarantees
 
-- **Append-only.** Entries and corrections are appended, never edited. Summaries are derived data; dropping one never touches an entry.
+- **Append-only journals.** Entries and corrections are appended, never edited. Summaries are derived data; dropping one never touches an entry.
+- **Read-only towards the vault.** Knowledge commands never modify a card; the only write is the rebuildable `.knowledge/index.json`.
 - **Folder-scoped.** Each agent folder has one journal; subfolders resolve to the same one. No global state, no server, no background process.
-- **Stdout contract.** Like `wake`'s pager footer, outputs are written for agent consumption: explicit next actions, machine-usable `#id` references, no noise.
+- **Stdout contract.** Outputs are written for agent consumption: explicit next actions, stable `#id` / card-name references, no noise.
 - **Standard library only** for the core. One `fcntl` lock guards concurrent access to a journal; that pins the supported platforms to macOS and Linux.
 
 ## Development
@@ -161,11 +202,11 @@ Encodes entries locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights ma
 python3 -m unittest discover -s tests -v
 ```
 
-Six tests exercise the CLI end-to-end in temporary folders: nested scope resolution, concurrent dedup, full-history wake coverage with original entries intact, hierarchical (two-level) summaries for large blocks, byte limits including prefixes, and the optional-index contract. No network, no model weights, no real journals.
+Eleven tests exercise the CLI end-to-end in temporary folders: journal scope resolution, concurrent dedup, full-history wake coverage with originals intact, hierarchical summaries, byte limits, the optional-index contract — and knowledge discovery, field-filtered briefs, filtered and fuzzy card search, card printing and the semantic-index contract. No network, no model weights, no real journals.
 
 ## Journals from other tools
 
-Memo has its own on-disk format and does not convert journals written by other engines; `init` refuses the known legacy formats. Real journals belong in the agent's folder, **not** in Git (see `.gitignore`).
+Memo has its own on-disk format and does not convert journals written by other engines; `init` refuses the known legacy formats. Real journals and vaults belong in the agent's folder, **not** in Git (see `.gitignore`).
 
 ## Attribution
 

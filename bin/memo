@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Memo: a local journal with a multiresolution view of its history."""
+"""Memo: local memory for agents — a journal and a knowledge brief.
+
+  memo memory init                create the journal in this folder
+  memo memory wake [part [T]]     read the progressively compressed overview
+  memo memory note "<line>"       append one short memory
+  memo memory compress            show or settle the next summary block
+  memo memory recall "<regex>"    search the journal; --fuzzy / --semantic
+  memo memory show | amend | retract | expand | drop-summary
+  memo memory index | status | tags
+
+  memo knowledge wake [topics…]   brief a field from a vault of note cards
+  memo knowledge recall "<regex>" search cards; --topic / --status / --fuzzy / --semantic
+  memo knowledge show <name>       print one card
+  memo knowledge index             build the optional semantic chunk index
+"""
 
 import argparse
 from contextlib import contextmanager
@@ -20,10 +34,13 @@ MAX_BYTES = 280
 WAKE_ROWS = 32
 PAGE_BYTES = 20_000
 RAW_BLOCK = 16
+KN_BRIEF = 5
 MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 TAGS = {"change", "decision", "blocker", "testing"}
 REFERENCE = re.compile(r"^(Amends|Retracts) #(\d+)(?:-(\d+))?: ")
 
+
+# --------------------------------------------------------------- shared
 
 def root(cwd):
     for folder in (cwd, *cwd.parents):
@@ -55,11 +72,6 @@ def atomic_json(path, value):
             stage.unlink(missing_ok=True)
 
 
-def read_entries(store):
-    with (store / "entries.jsonl").open(encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle]
-
-
 def check(text):
     text = text.strip()
     if not text or len(text.splitlines()) != 1 or len(text.encode()) > MAX_BYTES:
@@ -67,6 +79,31 @@ def check(text):
     if any(unicodedata.category(c) == "Cc" for c in text):
         raise ValueError("control characters are not allowed")
     return text
+
+
+def folded(text):
+    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold())
+                   if not unicodedata.combining(c))
+
+
+def embed(texts):
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        raise ValueError("semantic search requires: python3 -m pip install sentence-transformers")
+    # Model weights may be downloaded on first use; text is encoded locally.
+    return SentenceTransformer(MODEL).encode(texts, normalize_embeddings=True).tolist()
+
+
+def cosine(query, vector):
+    return math.fsum(a * b for a, b in zip(query, vector))
+
+
+# --------------------------------------------------------------- journal
+
+def read_entries(store):
+    with (store / "entries.jsonl").open(encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle]
 
 
 def append(store, entries, stamp, text):
@@ -157,7 +194,7 @@ def request_summary(store, entries, jobs):
     else:
         for half in halves(block):
             print(f"  #{block_name(half)} {summary(store, half)}")
-    print(f'Run: memo compress {name} "<your summary>"')
+    print(f'Run: memo memory compress {name} "<your summary>"')
 
 
 def wake(store, entries, args):
@@ -181,7 +218,7 @@ def wake(store, entries, args):
         pages[-1].append(row)
         used += width
     if not 1 <= args.part <= len(pages):
-        raise ValueError("no such page; run memo wake")
+        raise ValueError("no such page; run memo memory wake")
     if args.part == 1:
         print(f"Today is {date.today():%Y-%m-%d}.")
         if not count:
@@ -189,7 +226,7 @@ def wake(store, entries, args):
     for row in pages[args.part - 1]:
         print(row)
     if args.part < len(pages):
-        print(f"Not awake yet. Run: memo wake {args.part + 1} {count}")
+        print(f"Not awake yet. Run: memo memory wake {args.part + 1} {count}")
     else:
         print("You are awake.")
     return 0
@@ -206,25 +243,6 @@ def references(entries, ranges):
                 yield entry
 
 
-def folded(text):
-    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold())
-                   if not unicodedata.combining(c))
-
-
-def embed(texts):
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError:
-        raise ValueError("semantic search requires: python3 -m pip install sentence-transformers")
-    # Model weights may be downloaded on first use; journal text is encoded locally.
-    return SentenceTransformer(MODEL).encode(texts, normalize_embeddings=True).tolist()
-
-
-def read_index(store):
-    path = store / "index.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-
-
 def when(value):
     if value == "today":
         return date.today().isoformat()
@@ -238,6 +256,11 @@ def when(value):
     return value
 
 
+def read_index(store):
+    path = store / "index.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
 def recall(store, entries, args):
     since, until = (when(v) if v else None for v in (args.since or args.on, args.until or args.on))
     candidates = [entry for entry in entries
@@ -249,16 +272,15 @@ def recall(store, entries, args):
     if args.semantic:
         vectors = read_index(store)
         if not vectors:
-            raise ValueError("no semantic index; run memo index")
+            raise ValueError("no semantic index; run memo memory index")
         missing = len(entries) - len(vectors)
         if missing:
-            warning = f"{missing} entries newer than the index; run memo index."
+            warning = f"{missing} entries newer than the index; run memo memory index."
         candidates = [entry for entry in candidates if entry["id"] < len(vectors)]
         if candidates:
             query = embed([args.query])[0]
             candidates.sort(key=lambda e: (
-                math.fsum(a * b for a, b in zip(query, vectors[e["id"]])), e["id"]),
-                reverse=True)
+                cosine(query, vectors[e["id"]]), e["id"]), reverse=True)
     elif args.fuzzy:
         needle = folded(args.query)
         def score(entry):
@@ -290,48 +312,12 @@ def recall(store, entries, args):
         print(warning)
 
 
-def parser():
-    cli = argparse.ArgumentParser(description=__doc__)
-    commands = cli.add_subparsers(dest="command", required=True)
-    commands.add_parser("init", help="create a local journal")
-    p = commands.add_parser("wake", help="read the progressively compressed overview")
-    p.add_argument("part", nargs="?", type=int, default=1)
-    p.add_argument("snapshot", nargs="?", type=int)
-    p = commands.add_parser("note", help="append a short memory")
-    p.add_argument("text")
-    p.add_argument("--subject")
-    p.add_argument("--tag")
-    p.add_argument("--date")
-    p.add_argument("--force", action="store_true")
-    p = commands.add_parser("compress", help="show or settle the next summary")
-    p.add_argument("range", nargs="?")
-    p.add_argument("text", nargs="?")
-    p = commands.add_parser("recall", help="search original entries")
-    p.add_argument("query", nargs="?", default="")
-    p.add_argument("-n", "--limit", type=int, default=20)
-    p.add_argument("--subject")
-    p.add_argument("--since")
-    p.add_argument("--until")
-    p.add_argument("--on")
-    modes = p.add_mutually_exclusive_group()
-    modes.add_argument("--semantic", action="store_true")
-    modes.add_argument("--fuzzy", action="store_true")
-    for name in ("show", "amend", "retract", "expand", "drop-summary"):
-        p = commands.add_parser(name)
-        p.add_argument("target")
-        if name in ("amend", "retract"):
-            p.add_argument("text")
-    p = commands.add_parser("index", help="update the optional semantic index")
-    modes = p.add_mutually_exclusive_group()
-    modes.add_argument("--status", action="store_true")
-    modes.add_argument("--rebuild", action="store_true")
-    commands.add_parser("status")
-    p = commands.add_parser("tags")
-    p.add_argument("--add")
-    return cli
+def available_tags(store):
+    path = store / "tags.json"
+    return TAGS | (set(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else set())
 
 
-def run(args):
+def journal_run(args):
     cwd = Path.cwd().resolve()
     store = root(cwd)
     cmd = args.command
@@ -348,13 +334,13 @@ def run(args):
         print(f"Journal: {store}")
         return 0
     if store is None:
-        raise ValueError("no journal here; run memo init in the agent folder")
+        raise ValueError("no journal here; run memo memory init in the agent folder")
     # All reads and writes use a consistent journal snapshot. Index inference
     # releases the lock so it cannot hold up ordinary writes.
     with lock(store):
         entries = read_entries(store)
         if cmd != "index":
-            return operate(store, entries, args)
+            return journal_operate(store, entries, args)
         vectors = [] if args.rebuild else (read_index(store) or [])
     if args.status:
         print(f"Indexed {len(vectors)}/{len(entries)} entries.")
@@ -372,14 +358,14 @@ def run(args):
     return 0
 
 
-def operate(store, entries, args):
+def journal_operate(store, entries, args):
     cmd = args.command
     if cmd == "wake":
         return wake(store, entries, args)
     if cmd == "note":
         tag = args.tag.casefold() if args.tag else None
         if tag and tag not in available_tags(store) and not args.force:
-            raise ValueError(f"unknown tag: {tag}; see memo tags")
+            raise ValueError(f"unknown tag: {tag}; see memo memory tags")
         subject = f"[{args.subject}] " if args.subject else ""
         stamp = args.date or date.today().isoformat()
         datetime.fromisoformat(stamp)
@@ -395,12 +381,12 @@ def operate(store, entries, args):
         jobs = pending(store, len(entries))
         if args.range is not None or args.text is not None:
             if not args.range or not args.text:
-                raise ValueError('expected: memo compress <range> "<summary>"')
+                raise ValueError('expected: memo memory compress <range> "<summary>"')
             target = block_id(args.range)
             if summary(store, target) is not None:
                 print(f"#{block_name(target)} is already summarized.")
             elif not jobs or target != jobs[0]:
-                raise ValueError("not the next pending block; run memo compress")
+                raise ValueError("not the next pending block; run memo memory compress")
             else:
                 atomic_json(summary_path(store, target), check(args.text))
                 print(f"#{block_name(target)} saved.")
@@ -463,9 +449,338 @@ def operate(store, entries, args):
     return 0
 
 
-def available_tags(store):
-    path = store / "tags.json"
-    return TAGS | (set(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else set())
+# --------------------------------------------------------------- knowledge
+
+def vault_locate(explicit=None):
+    """A vault is a folder with `sources/` and `topics/`; discovery walks up."""
+    if explicit:
+        vault = Path(explicit).expanduser().resolve()
+    else:
+        env = os.environ.get("KNOWLEDGE_DIR")
+        found = None
+        start = Path(env).expanduser().resolve() if env else Path.cwd().resolve()
+        if env:
+            found = start
+        else:
+            for folder in (start, *start.parents):
+                for candidate in (folder, folder / "0-KNOWLEDGE", folder / "knowledge"):
+                    if (candidate / "sources").is_dir() and (candidate / "topics").is_dir():
+                        found = candidate.resolve()
+                        break
+                if found:
+                    break
+        if found is None:
+            raise ValueError("no knowledge vault found; pass --dir or set KNOWLEDGE_DIR")
+        vault = found
+    if not (vault / "sources").is_dir() or not (vault / "topics").is_dir():
+        raise ValueError(f"not a knowledge vault (needs sources/ and topics/): {vault}")
+    return vault
+
+
+def parse_note(text):
+    match = re.match(r"^---\n(.*?)\n---\n?(.*)\Z", text, re.S)
+    if not match:
+        return {}, text
+    meta = {}
+    for line in match.group(1).split("\n"):
+        m = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", line)
+        if m:
+            meta[m.group(1)] = m.group(2).strip()
+    return meta, match.group(2)
+
+
+def meta_topics(meta):
+    raw = (meta.get("topics") or "").strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    return [t.strip().strip('"').strip("[]") for t in raw.split(",") if t.strip()]
+
+
+def load_cards(vault):
+    cards = []
+    for path in sorted((vault / "sources").glob("*.md")):
+        meta, body = parse_note(path.read_text(encoding="utf-8"))
+        cards.append({
+            "name": path.stem,
+            "title": meta.get("title", "").strip('"') or path.stem,
+            "status": (meta.get("status") or "new").strip('"'),
+            "captured": (meta.get("captured") or meta.get("published") or "").strip('"'),
+            "topics": meta_topics(meta),
+            "meta": meta,
+            "body": body,
+        })
+    return cards
+
+
+def kn_filter(cards, args):
+    if getattr(args, "topic", None):
+        want = {t.strip().strip('"[] ') for t in args.topic}
+        cards = [c for c in cards if want & set(c["topics"])]
+    if getattr(args, "status", None):
+        cards = [c for c in cards if c["status"] == args.status]
+    return cards
+
+
+def kn_wake(vault, args):
+    topics = [t.strip().strip('"[] ') for t in args.topics]
+    cards = load_cards(vault)
+    pool = [c for c in cards if not topics or set(c["topics"]) & set(topics)]
+    stamps = {}
+    for folder, label in (("inbox", "in inbox"), ("ideas", "ideas"), ("sources", "sources")):
+        stamps[label] = len(list((vault / folder).glob("*"))) if (vault / folder).is_dir() else 0
+    field = ", ".join(topics) if topics else "whole vault"
+    print(f"Knowledge: {vault}")
+    print(f"{stamps['sources']} sources, {stamps['ideas']} ideas, {stamps['in inbox']} in inbox. "
+          f"Field: {field} — {len(pool)} source(s) match.")
+    used = sum(1 for c in pool if c["status"] == "used")
+    for status, cap, label in (("new", KN_BRIEF, "Fresh"), ("read", 3, "Ready to use")):
+        bucket = sorted((c for c in pool if c["status"] == status),
+                        key=lambda c: (c["captured"], c["name"]), reverse=True)
+        print(f"{label} ({status}): {len(bucket)}")
+        for card in bucket[:cap]:
+            tags = ", ".join(card["topics"]) or "no topics"
+            print(f"- {card['name']} ({card['captured']}) [{tags}]")
+    if used:
+        print(f"Used in outputs: {used}")
+    routers = [t for t in topics if (vault / "topics" / f"{t}.md").exists()]
+    if routers:
+        print("Routers: " + ", ".join(f"topics/{t}.md" for t in routers))
+    print("You are briefed.")
+    print('Recall with: memo knowledge recall "<query>" [--topic <tag>] [--status <s>]')
+    return 0
+
+
+def kn_chunks(card):
+    """Embedding window is short: chunk a card into heading-sized parts,
+    each carrying the title, so a hit points at the part that matched."""
+    chunks = []
+    seen = set()
+    for para in re.split(r"\n(?=#)|\n\s*\n", card["body"]):
+        text = " ".join(para.split())
+        if not text:
+            continue
+        chunk = f"{card['title']}\n{text}"
+        if chunk not in seen:
+            seen.add(chunk)
+            chunks.append({"card": card["name"], "text": chunk})
+    return chunks
+
+
+def kn_index_path(vault):
+    return vault / ".knowledge" / "index.json"
+
+
+def kn_index_read(vault):
+    path = kn_index_path(vault)
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def kn_recall(vault, args):
+    if args.limit < 1 or ((args.semantic or args.fuzzy) and not args.query):
+        raise ValueError("use a positive result limit and a nonempty fuzzy/semantic query")
+    cards = kn_filter(load_cards(vault), args)
+    warning = None
+    if args.semantic:
+        index = kn_index_read(vault)
+        if not index:
+            raise ValueError("no semantic index; run memo knowledge index")
+        if index["cards"] != len(load_cards(vault)):
+            warning = "cards changed since the index; run memo knowledge index"
+        names = {c["name"] for c in cards}
+        scored = sorted(((cosine(query, vector), chunk) for vector, chunk
+                         in zip(index["vectors"], index["chunks"])
+                         if chunk["card"] in names),
+                        key=lambda item: (-item[0], item[1]["card"]))
+        if scored:
+            query = embed([args.query])[0]
+            best, seen = [], set()
+            for score, chunk in scored:
+                if chunk["card"] not in seen:
+                    seen.add(chunk["card"])
+                    best.append((score, chunk))
+                if len(best) >= args.limit:
+                    break
+            by_name = {c["name"]: c for c in cards}
+            for score, chunk in best:
+                card = by_name[chunk["card"]]
+                tags = ", ".join(card["topics"]) or "no topics"
+                print(f"{card['name']} ({card['status']}, {card['captured']}) "
+                      f"[{tags}] -- {score:.2f}")
+                print("  " + " ".join(chunk["text"].split("\n", 1)[1].split())[:160])
+            print(f"{len(seen)} card(s), ranked by meaning." if seen else "No card.")
+        else:
+            print("No card.")
+    else:
+        if args.fuzzy:
+            needle = folded(args.query)
+            def score(card):
+                text = folded(card["body"] + " " + card["title"] + " " + card["name"])
+                if needle in text:
+                    return 1.0
+                words = text.split()
+                widths = max(1, len(needle.split()))
+                return max((SequenceMatcher(None, needle, " ".join(words[i:i + widths])).ratio()
+                            for i in range(len(words))), default=0)
+            matches = [(score(card), card) for card in cards]
+            cards = [card for value, card in sorted(
+                matches, key=lambda item: (item[0], item[1]["name"]), reverse=True)
+                if value >= 0.6]
+        elif args.query:
+            pattern = re.compile(args.query, re.IGNORECASE)
+            cards = [c for c in cards if pattern.search(
+                f"{c['name']} {c['title']} {c['body']}")]
+        cards.sort(key=lambda c: (c["captured"], c["name"]), reverse=True)
+        shown = cards[:args.limit]
+        for card in shown:
+            tags = ", ".join(card["topics"]) or "no topics"
+            print(f"{card['name']} ({card['status']}, {card['captured']}) "
+                  f"[{tags}] {card['title']}")
+        print(f"{len(cards)} card(s)." if cards else "No card.")
+    if warning:
+        print(warning)
+    return 0
+
+
+def kn_show(vault, args):
+    target = args.file.strip().removesuffix(".md")
+    hits = []
+    for folder in ("sources", "ideas"):
+        path = vault / folder / f"{target}.md"
+        if path.exists():
+            hits.append(path)
+    if not hits:
+        for folder in ("sources", "ideas"):
+            for path in (vault / folder).glob("*.md"):
+                if target in path.stem:
+                    hits.append(path)
+        if len(hits) != 1:
+            raise ValueError("no unique card: " + args.file)
+    path = hits[0]
+    meta, body = parse_note(path.read_text(encoding="utf-8"))
+    print(f"{path.stem} [{', '.join(meta_topics(meta)) or 'no topics'}] "
+          f"status: {(meta.get('status') or 'new').strip(chr(34))}")
+    for key in ("author", "url", "published", "captured", "rating"):
+        if meta.get(key):
+            print(f"{key}: {meta[key].strip(chr(34))}")
+    print()
+    print(body.strip())
+    return 0
+
+
+def kn_index(vault, args):
+    cards = load_cards(vault)
+    if args.status:
+        index = kn_index_read(vault)
+        if index:
+            print(f"Indexed {index['cards']} cards, {len(index['chunks'])} chunks.")
+        else:
+            print("No semantic index. Run: memo knowledge index")
+        return 0
+    old = None if args.rebuild else kn_index_read(vault)
+    done = {chunk["card"] for chunk in old["chunks"]} if old else set()
+    fresh = [chunk for card in cards if card["name"] not in done for chunk in kn_chunks(card)]
+    if old and not fresh and old["cards"] == len(cards):
+        print(f"Indexed {len(cards)} cards, {len(old['chunks'])} chunks (up to date).")
+        return 0
+    vectors = embed([chunk["text"] for chunk in fresh])
+    chunks = (old["chunks"] if old else []) + fresh
+    index = {
+        "cards": len(cards),
+        "chunks": chunks,
+        "vectors": (old["vectors"] if old else []) + vectors,
+    }
+    (vault / ".knowledge").mkdir(exist_ok=True)
+    atomic_json(kn_index_path(vault), index)
+    print(f"Indexed {index['cards']} cards, {len(index['chunks'])} chunks "
+          f"(start-of-command snapshot).")
+    return 0
+
+
+def knowledge_run(args):
+    vault = vault_locate(args.dir)
+    if args.command == "wake":
+        return kn_wake(vault, args)
+    if args.command == "recall":
+        return kn_recall(vault, args)
+    if args.command == "show":
+        return kn_show(vault, args)
+    return kn_index(vault, args)
+
+
+# --------------------------------------------------------------- cli
+
+def parser():
+    cli = argparse.ArgumentParser(description=__doc__)
+    groups = cli.add_subparsers(dest="group", required=True)
+
+    memory = groups.add_parser("memory", help="the agent's journal")
+    commands = memory.add_subparsers(dest="command", required=True)
+    commands.add_parser("init", help="create a local journal")
+    p = commands.add_parser("wake", help="read the progressively compressed overview")
+    p.add_argument("part", nargs="?", type=int, default=1)
+    p.add_argument("snapshot", nargs="?", type=int)
+    p = commands.add_parser("note", help="append a short memory")
+    p.add_argument("text")
+    p.add_argument("--subject")
+    p.add_argument("--tag")
+    p.add_argument("--date")
+    p.add_argument("--force", action="store_true")
+    p = commands.add_parser("compress", help="show or settle the next summary")
+    p.add_argument("range", nargs="?")
+    p.add_argument("text", nargs="?")
+
+    p = commands.add_parser("recall", help="search original entries")
+    p.add_argument("query", nargs="?", default="")
+    p.add_argument("-n", "--limit", type=int, default=20)
+    p.add_argument("--subject")
+    p.add_argument("--since")
+    p.add_argument("--until")
+    p.add_argument("--on")
+    modes = p.add_mutually_exclusive_group()
+    modes.add_argument("--semantic", action="store_true")
+    modes.add_argument("--fuzzy", action="store_true")
+    for name in ("show", "amend", "retract", "expand", "drop-summary"):
+        p = commands.add_parser(name)
+        p.add_argument("target")
+        if name in ("amend", "retract"):
+            p.add_argument("text")
+    p = commands.add_parser("index", help="update the optional semantic index")
+    modes = p.add_mutually_exclusive_group()
+    modes.add_argument("--status", action="store_true")
+    modes.add_argument("--rebuild", action="store_true")
+    commands.add_parser("status")
+    p = commands.add_parser("tags")
+    p.add_argument("--add")
+
+    knowledge = groups.add_parser("knowledge", help="brief and search a vault of note cards")
+    kcmd = knowledge.add_subparsers(dest="command", required=True)
+    p = kcmd.add_parser("wake", help="one brief of the field, from vault frontmatter")
+    p.add_argument("topics", nargs="*")
+    p.add_argument("--dir")
+    p = kcmd.add_parser("recall", help="search source cards; regex by default")
+    p.add_argument("query", nargs="?", default="")
+    p.add_argument("-n", "--limit", type=int, default=20)
+    p.add_argument("--topic", action="append", help="filter by topic (repeatable)")
+    p.add_argument("--status", help="filter by status: new, read, used")
+    modes = p.add_mutually_exclusive_group()
+    modes.add_argument("--semantic", action="store_true")
+    modes.add_argument("--fuzzy", action="store_true")
+    p.add_argument("--dir")
+    p = kcmd.add_parser("show", help="print one card")
+    p.add_argument("file")
+    p.add_argument("--dir")
+    p = kcmd.add_parser("index", help="build or refresh the optional semantic index")
+    modes = p.add_mutually_exclusive_group()
+    modes.add_argument("--status", action="store_true")
+    modes.add_argument("--rebuild", action="store_true")
+    p.add_argument("--dir")
+    return cli
+
+
+def run(args):
+    if args.group == "knowledge":
+        return knowledge_run(args)
+    return journal_run(args)
 
 
 if __name__ == "__main__":
