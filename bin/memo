@@ -44,7 +44,7 @@ REFERENCE = re.compile(r"^(Amends|Retracts) #(\d+)(?:-(\d+))?: ")
 
 def root(cwd):
     for folder in (cwd, *cwd.parents):
-        store = folder / ".memo"
+        store = folder / ".memory"
         if store.exists() or store.is_symlink():
             if not store.is_dir() or store.is_symlink():
                 raise ValueError(f"expected a real directory: {store}")
@@ -324,7 +324,7 @@ def journal_run(args):
     if cmd == "init":
         if store is not None and store.parent != cwd:
             raise ValueError(f"this folder already belongs to {store.parent}")
-        store = cwd / ".memo"
+        store = cwd / ".memory"
         store.mkdir(mode=0o700, exist_ok=True)
         with lock(store):
             if (store / "entries.txt").exists() or (store / "LOG.txt").exists():

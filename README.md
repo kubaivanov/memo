@@ -72,7 +72,7 @@ Older stretches appear as one-line summaries of 2, 4, 8, 16… entries; the newe
 
 ```text
 agent/
-└── .memo/
+└── .memory/
     ├── entries.jsonl   the journal — append-only, never rewritten
     ├── summaries/      one JSON file per compressed block (2, 4, 8, …)
     └── index.json      optional semantic-search vectors
@@ -118,9 +118,9 @@ One journal per agent, one folder per channel — and one shared vault of what t
 
 ```text
 team/
-├── google-ads/   └── .memo/   journal: budget & bidding decisions, QA evidence
-├── meta-ads/     └── .memo/   journal: creative approvals, catalog work
-├── reddit-ads/   └── .memo/   journal: campaign windows, caps, day-boundary reads
+├── google-ads/   └── .memory/   journal: budget & bidding decisions, QA evidence
+├── meta-ads/     └── .memory/   journal: creative approvals, catalog work
+├── reddit-ads/   └── .memory/   journal: campaign windows, caps, day-boundary reads
 └── 0-KNOWLEDGE/              vault: source cards, topic routers
 ```
 
@@ -160,7 +160,7 @@ Runs from a subfolder resolve to the same journal (and walk up to find a vault).
 
 | Command | Purpose |
 | --- | --- |
-| `memo memory init` | Create the journal (`.memo/`) for this folder. |
+| `memo memory init` | Create the journal (`.memory/`) for this folder. |
 | `memo memory wake [part [snapshot]]` | The progressive-compression overview. |
 | `memo memory note [--subject s] [--tag t] [--date d] "line"` | Append one memory; duplicate-checked. |
 | `memo memory compress [<range> "<summary>"]` | Show the next compression job, or store a summary. |

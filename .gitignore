@@ -1,5 +1,6 @@
+**/.memory/
 **/.memo/
-**/.optmem/
+**/.knowledge/
 __pycache__/
 *.py[cod]
 .venv/

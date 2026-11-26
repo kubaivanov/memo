@@ -26,7 +26,7 @@ class MemoTests(unittest.TestCase):
         return result.stdout + result.stderr
 
     def seed(self, count):
-        path = self.bot / ".memo" / "entries.jsonl"
+        path = self.bot / ".memory" / "entries.jsonl"
         path.write_text("".join(json.dumps({"id": i, "date": "2026-11-25",
                                             "text": f"Original entry {i}"}) + "\n"
                                 for i in range(count)), encoding="utf-8")
