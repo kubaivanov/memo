@@ -452,28 +452,29 @@ def journal_operate(store, entries, args):
 # --------------------------------------------------------------- knowledge
 
 def vault_locate(explicit=None):
-    """A vault is a folder with `sources/` and `topics/`; discovery walks up."""
-    if explicit:
-        vault = Path(explicit).expanduser().resolve()
-    else:
-        env = os.environ.get("KNOWLEDGE_DIR")
-        found = None
-        start = Path(env).expanduser().resolve() if env else Path.cwd().resolve()
-        if env:
-            found = start
-        else:
-            for folder in (start, *start.parents):
-                for candidate in (folder, folder / "0-KNOWLEDGE", folder / "knowledge"):
-                    if (candidate / "sources").is_dir() and (candidate / "topics").is_dir():
-                        found = candidate.resolve()
-                        break
-                if found:
-                    break
-        if found is None:
-            raise ValueError("no knowledge vault found; pass --dir or set KNOWLEDGE_DIR")
-        vault = found
+    """The vault is chosen, never guessed, in this order: --dir,
+    KNOWLEDGE_DIR, then knowledge_dir in the config file."""
+    for origin, value in (("--dir", explicit),
+                          ("KNOWLEDGE_DIR", os.environ.get("KNOWLEDGE_DIR"))):
+        if value:
+            return vault_check(Path(value).expanduser().resolve(), origin)
+    config = Path(os.environ.get("MEMO_CONFIG")
+                  or Path.home() / ".config" / "memo" / "config.json")
+    if config.is_file():
+        try:
+            chosen = json.loads(config.read_text(encoding="utf-8")).get("knowledge_dir")
+        except json.JSONDecodeError as error:
+            raise ValueError(f"bad config {config}: {error}")
+        if chosen:
+            return vault_check(Path(chosen).expanduser().resolve(), str(config))
+    raise ValueError("no knowledge vault selected; pass --dir, set KNOWLEDGE_DIR, "
+                     f"or set knowledge_dir in {config}")
+
+
+def vault_check(vault, origin):
     if not (vault / "sources").is_dir() or not (vault / "topics").is_dir():
-        raise ValueError(f"not a knowledge vault (needs sources/ and topics/): {vault}")
+        raise ValueError(f"not a knowledge vault (needs sources/ and topics/), "
+                         f"via {origin}: {vault}")
     return vault
 
 

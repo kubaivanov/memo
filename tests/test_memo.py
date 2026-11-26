@@ -1,5 +1,6 @@
 import concurrent.futures
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -114,10 +115,11 @@ class KnowledgeTests(unittest.TestCase):
         self.bot.mkdir()
         self.vault = self.make_vault()
 
-    def call(self, *args, cwd=None, code=0):
+    def call(self, *args, cwd=None, code=0, env=None):
         result = subprocess.run([sys.executable, str(CLI), *args],
                                 cwd=cwd or self.bot, capture_output=True,
-                                text=True, timeout=10)
+                                text=True, timeout=10,
+                                env={**os.environ, **(env or {})})
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
         return result.stdout + result.stderr
 
@@ -147,33 +149,55 @@ class KnowledgeTests(unittest.TestCase):
                 f"# {title}\n\n{body}\n", encoding="utf-8")
         return vault
 
-    def test_wake_field_brief_filters_and_uses_discovery(self):
-        out = self.call("knowledge", "wake", "chatgpt-ads", "ppc")
+    def test_wake_field_brief_filters_the_chosen_vault(self):
+        out = self.call("knowledge", "wake", "chatgpt-ads", "ppc",
+                        "--dir", self.vault)
         self.assertIn("1 source(s) match", out)
         self.assertIn("openai--chatgpt-ads-44", out)
         self.assertNotIn("growth-memo--meta-analysis", out)
         self.assertIn("Routers: topics/ppc.md", out)
         self.assertIn("You are briefed.", out)
-        every = self.call("knowledge", "wake")
+        every = self.call("knowledge", "wake", "--dir", self.vault)
         self.assertIn("3 sources, 1 ideas, 1 in inbox", every)
         self.assertIn("Field: whole vault — 3 source(s) match", every)
 
+    def test_vault_selection_env_and_config(self):
+        out = self.call("knowledge", "wake", "ppc",
+                        env={"KNOWLEDGE_DIR": str(self.vault)})
+        self.assertIn("You are briefed.", out)
+        config = self.home / "memo-config.json"
+        config.write_text(json.dumps(
+            {"knowledge_dir": str(self.vault)}), encoding="utf-8")
+        out = self.call("knowledge", "wake", "ppc",
+                        env={"MEMO_CONFIG": str(config), "KNOWLEDGE_DIR": ""})
+        self.assertIn("You are briefed.", out)
+        # a bad selection is a clear error, never a guess
+        self.assertIn("not a knowledge vault",
+                      self.call("knowledge", "wake", "--dir", self.home, code=1))
+        self.assertIn("no knowledge vault selected",
+                      self.call("knowledge", "wake",
+                                env={"KNOWLEDGE_DIR": "", "MEMO_CONFIG": "/nonexistent"},
+                                code=1))
+
     def test_recall_regex_and_filters(self):
-        out = self.call("knowledge", "recall", "reseller")
+        env = {"KNOWLEDGE_DIR": str(self.vault)}
+        out = self.call("knowledge", "recall", "reseller", env=env)
         self.assertIn("openai--chatgpt-ads-44", out)
         self.assertIn("1 card(s)", out)
-        out = self.call("knowledge", "recall", "", "--topic", "ai-search")
+        out = self.call("knowledge", "recall", "", "--topic", "ai-search", env=env)
         self.assertIn("growth-memo--meta-analysis", out)
         self.assertNotIn("n8n--meet-nod", out)
-        out = self.call("knowledge", "recall", "", "--status", "read", "-n", "1")
+        out = self.call("knowledge", "recall", "", "--status", "read", "-n", "1", env=env)
         self.assertIn("(read", out)
 
     def test_recall_fuzzy_survives_mangled_words(self):
-        out = self.call("knowledge", "recall", "--fuzzy", "meet nod stanalone agent")
+        out = self.call("knowledge", "recall", "--fuzzy", "meet nod stanalone agent",
+                        env={"KNOWLEDGE_DIR": str(self.vault)})
         self.assertIn("n8n--meet-nod", out)
 
     def test_show_prints_card_not_frontmatter(self):
-        out = self.call("knowledge", "show", "growth-memo--meta-analysis")
+        out = self.call("knowledge", "show", "growth-memo--meta-analysis",
+                        env={"KNOWLEDGE_DIR": str(self.vault)})
         self.assertIn("AI search meta analysis", out)
         self.assertIn("captured: 2026-11-16", out)
         self.assertIn("[ai-search, seo]", out)
@@ -181,10 +205,12 @@ class KnowledgeTests(unittest.TestCase):
         self.assertFalse(out.lstrip().startswith("---"))
 
     def test_semantic_contract_without_index(self):
+        env = {"KNOWLEDGE_DIR": str(self.vault)}
         self.assertIn("no semantic index",
                       self.call("knowledge", "recall", "--semantic", "resellers",
-                                code=1))
-        self.assertIn("No semantic index", self.call("knowledge", "index", "--status"))
+                                env=env, code=1))
+        self.assertIn("No semantic index",
+                      self.call("knowledge", "index", "--status", env=env))
         self.assertIn("not a knowledge vault",
                       self.call("knowledge", "wake", "--dir", self.bot / "nowhere",
                                 code=1))

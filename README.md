@@ -93,7 +93,7 @@ Routers: topics/chatgpt-ads.md, topics/ppc.md
 You are briefed.
 ```
 
-With no topics, the brief covers the whole vault. The vault is located with `--dir`, the `KNOWLEDGE_DIR` environment variable, or by walking up from the working folder (including `0-KNOWLEDGE` and `knowledge` subfolders).
+With no topics, the brief covers the whole vault. **The vault is chosen, never guessed**, in this order: the `--dir` argument, the `KNOWLEDGE_DIR` environment variable, or `knowledge_dir` in `~/.config/memo/config.json` (`MEMO_CONFIG` to relocate the config). Without a selection Memo tells you how to make one.
 
 Search the cards by exact words, filters, or meaning:
 
@@ -122,7 +122,7 @@ vault/
                     ever writes into your vault; everything else is yours
 ```
 
-Both stores are folder-scoped: runs from a subfolder resolve to the same journal, and discovery walks up to find the vault.
+Both stores are folder-scoped: runs from a subfolder resolve to the same journal. The knowledge vault is whatever you selected — one machine, one vault, or a different `--dir` per call.
 
 ## For PPC teams running agents
 
