@@ -17,11 +17,16 @@ A journal that compresses itself, and a brief over what your field knows.
 
 ---
 
-Your ads agents manage live campaigns across sessions: budget moves, bid-strategy reverts, creative approvals, sync tags, open QA items. Every new session starts from scratch — the transcript is too long to reread, and the last few messages lose everything older. Memo gives each agent two things in its own folder: **`memo memory wake`** shows its whole history in a few lines — old material compressed, recent material verbatim, nothing deleted — and **`memo knowledge wake`** briefs its field from a vault of note cards.
+Your ads agents manage live campaigns across sessions: budget moves, bid-strategy reverts, creative approvals, sync tags, open QA items. Every new session starts from scratch — the transcript is too long to reread, and the last few messages lose everything older.
+
+Memo gives each agent two stores, next to its work:
+
+- **`memo memory …`** — a journal that compresses itself. `memo memory wake` shows the whole history in a few lines: old material compressed, recent material verbatim, nothing deleted.
+- **`memo knowledge …`** — a brief over a vault of note cards. `memo knowledge wake ppc chatgpt-ads` answers "what does my field know?", from your own curated sources.
 
 No daemon, no IDE plugin, no external service. One file of Python from the standard library.
 
-## Memory: the one command that matters
+## Memory: a journal that compresses itself
 
 `memo memory wake` on an ads agent's journal with 113 entries prints 32 lines and covers *all* of them:
 
@@ -64,31 +69,20 @@ You are awake.
 
 Older stretches appear as one-line summaries of 2, 4, 8, 16… entries; the newest entries appear verbatim. Every entry is covered exactly once — no gaps, no overlaps — and nothing is ever deleted.
 
-## How memory works
+How the three commands fit together:
 
 1. **`memo memory note`** appends one short line (≤ 280 bytes): a change, a decision, a blocker, a lesson. Duplicates are detected under the same lock as the write, so parallel sessions can't double-record.
 2. **`memo memory compress`** stores one-line summaries for aligned blocks. Blocks up to 16 entries are summarized from the originals; larger blocks are built from two smaller summaries. Your agent writes the summary — Memo never calls a model behind your back.
 3. **`memo memory wake`** selects whole blocks to fit ~32 lines and prints them. If a required summary is missing, it prints the next compression job with its inputs and asks for it, then you re-run `wake`.
 
-```text
-agent/
-└── .memory/
-    ├── entries.jsonl   the journal — append-only, never rewritten
-    ├── summaries/      one JSON file per compressed block (2, 4, 8, …)
-    └── index.json      optional semantic-search vectors
-```
-
-Corrections are appends too: `memo memory amend <id>` and `memo memory retract <id>` add entries that reference what they correct. The history is never edited. `memo memory recall` shows later corrections under the hits it returns.
+Corrections are appends too: `memo memory amend <id>` and `memo memory retract <id>` add entries that reference what they correct. The history is never edited, and `memo memory recall` shows later corrections under the hits it returns.
 
 ## Knowledge: a brief of the field
 
 A knowledge vault is any folder of note cards with `sources/` and `topics/` — an Obsidian vault works as-is. Cards carry YAML frontmatter (`title`, `status: new|read|used`, `captured`, `topics`); topics are quoted wikilinks (`"[[ppc]]"`) pointing at router notes.
 
 ```text
-memo knowledge wake chatgpt-ads ppc
-```
-
-```text
+$ memo knowledge wake chatgpt-ads ppc
 Knowledge: ~/0-KNOWLEDGE
 22 sources, 0 ideas, 1 in inbox. Field: chatgpt-ads, ppc — 5 source(s) match.
 Fresh (new): 0
@@ -99,18 +93,36 @@ Routers: topics/chatgpt-ads.md, topics/ppc.md
 You are briefed.
 ```
 
-With no topics, the brief covers the whole vault. The vault is located with `--dir`, the `KNOWLEDGE_DIR` environment variable, or by walking up from the working folder (including `0-KNOWLEDGE` and `knowledge` subfolders). Knowledge commands are read-only towards the vault; the only thing Memo ever writes there is the derived, rebuildable semantic index in `.knowledge/`.
+With no topics, the brief covers the whole vault. The vault is located with `--dir`, the `KNOWLEDGE_DIR` environment variable, or by walking up from the working folder (including `0-KNOWLEDGE` and `knowledge` subfolders).
 
 Search the cards by exact words, filters, or meaning:
 
 ```sh
 memo knowledge recall "CTR pozice 1" --topic ai-search --status read
-memo knowledge recall --fuzzy "meta analisis"          # typo-tolerant
-memo knowledge index                                    # optional, once
+memo knowledge recall --fuzzy "meta analisis"     # typo-tolerant
+memo knowledge index                              # optional, once
 memo knowledge recall --semantic "what fell after AI Overviews?"
 ```
 
-For semantic search the index is built **per chunk**: each title-prefixed paragraph of a card gets its own vector, so a hit points at the paragraph that matched — and bodies longer than the model window still work.
+For semantic search the index is built **per chunk**: each title-prefixed paragraph of a card gets its own vector, so a hit points at the paragraph that matched — and bodies longer than the model window still work:
+
+```text
+growth-memo--meta-analysis--2026-11-16 (read, 2026-11-18) [ai-search, seo, …] -- 0.54
+  CTR on position 1 with AI Overviews fell 58% relatively…
+```
+
+## Where the data lives
+
+```text
+agent-folder/
+└── .memory/        the journal: entries.jsonl (append-only),
+                    summaries/ (derived, rebuildable), index.json (optional)
+vault/
+└── .knowledge/     the chunked semantic index — the only thing Memo
+                    ever writes into your vault; everything else is yours
+```
+
+Both stores are folder-scoped: runs from a subfolder resolve to the same journal, and discovery walks up to find the vault.
 
 ## For PPC teams running agents
 
@@ -118,16 +130,16 @@ One journal per agent, one folder per channel — and one shared vault of what t
 
 ```text
 team/
-├── google-ads/   └── .memory/   journal: budget & bidding decisions, QA evidence
-├── meta-ads/     └── .memory/   journal: creative approvals, catalog work
-├── reddit-ads/   └── .memory/   journal: campaign windows, caps, day-boundary reads
-└── 0-KNOWLEDGE/              vault: source cards, topic routers
+├── google-ads/  └── .memory/   journal: budget & bidding decisions, QA evidence
+├── meta-ads/    └── .memory/   journal: creative approvals, catalog work
+├── reddit-ads/  └── .memory/   journal: campaign windows, caps, day-boundary reads
+└── 0-KNOWLEDGE/               vault: source cards, topic routers per channel
 ```
 
 The loop that makes it work:
 
 1. **`memo memory wake`** at session start — the agent sees what changed, what's binding and what's still open.
-2. **`memo memory note`** after each confirmed change; **`memo knowledge wake <topics>`** before research, so it starts from what the team already collected instead of re-reading the internet.
+2. **`memo memory note`** after each confirmed change; **`memo knowledge wake <topics>`** before research, so the agent starts from what the team already collected instead of re-reading the internet.
 3. **`memo knowledge recall`** when the question is "what do we know about promo codes?" — over your own curated cards, with filters and their exact citations.
 
 Because agents write plain, dated lines as they work, week-old context costs one summary line — and your team can audit exactly what the agent believed when it acted.
@@ -154,9 +166,11 @@ printf -- '# PPC\n' > demo-vault/topics/ppc.md
 memo knowledge wake ppc --dir demo-vault
 ```
 
-Runs from a subfolder resolve to the same journal (and walk up to find a vault). A minimal drop-in instruction for your agent lives in [`skill/SKILL.md`](skill/SKILL.md).
+A minimal drop-in instruction for your agent lives in [`skill/SKILL.md`](skill/SKILL.md).
 
 ## Commands
+
+### `memo memory` — the journal
 
 | Command | Purpose |
 | --- | --- |
@@ -165,12 +179,17 @@ Runs from a subfolder resolve to the same journal (and walk up to find a vault).
 | `memo memory note [--subject s] [--tag t] [--date d] "line"` | Append one memory; duplicate-checked. |
 | `memo memory compress [<range> "<summary>"]` | Show the next compression job, or store a summary. |
 | `memo memory recall "regex" [-n 20] [--since 7d] [--subject s]` | Search the journal; shows later corrections. |
-| `memo recall --fuzzy` / `--semantic` | Typo-tolerant / meaning-based journal search. |
+| `memo memory recall --fuzzy "…" / --semantic "…"` | Typo-tolerant / meaning-based journal search. |
 | `memo memory show <id \| lo-hi>` | One entry (or block) plus later references. |
 | `memo memory amend <id> "correction"` / `retract <id> "reason"` | Append corrections; history is never rewritten. |
-| `memo memory expand <lo-hi>` / `drop-summary <lo-hi>` | Open a summary into halves / discard a derived summary. |
-| `memo memory index [-status \| --rebuild]` / `status` / `tags` | Optional index, stats, tag vocabulary. |
-| `memo knowledge wake [topics…] [--dir v]` | One field brief from vault frontmatter. |
+| `memo memory expand <lo-hi>` / `drop-summary <lo-hi>` | Open a summary into its halves / discard a derived summary. |
+| `memo memory index [-status \| --rebuild]` / `status` / `tags` | Optional index, journal stats, tag vocabulary. |
+
+### `memo knowledge` — the vault
+
+| Command | Purpose |
+| --- | --- |
+| `memo knowledge wake [topics…] [--dir v]` | One field brief, assembled from vault frontmatter. |
 | `memo knowledge recall "regex" [--topic t] [--status s] [-n]` | Search cards by words and filters. |
 | `memo knowledge recall --fuzzy "…" / --semantic "…"` | Typo-tolerant / meaning-based card search. |
 | `memo knowledge show <name> [--dir v]` | Print one card: metadata plus body, without the YAML. |
@@ -182,8 +201,8 @@ Default journal tags: `change`, `decision`, `blocker`, `testing`. Size limits (`
 
 ```sh
 python3 -m pip install sentence-transformers
-memo memory index          # journal entries
-memo knowledge index --dir ~/0-KNOWLEDGE   # knowledge chunks
+memo memory index                        # journal entries
+memo knowledge index --dir ~/vault       # knowledge chunks
 ```
 
 Encodes text locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights may download on first use). `recall` never builds an index as a side effect: if data is newer than the index, it says so and you re-index. Regex and fuzzy search work without the model — the core tool stays dependency-free.
