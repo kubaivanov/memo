@@ -13,6 +13,7 @@ description: Resume work with the local Memo journal; brief your field from a se
 - `memo memory show <id>` / `expand <lo-hi>` — read an entry, open a block
 - `memo memory amend <id> "…"` / `retract <id> "…"` — correct an entry; never rewrite history
 - `memo memory compress <lo-hi> "<summary>"` — settle the block wake asks for
+- `memo memory index` — pre-build the semantic index (maintained automatically otherwise)
 
 **Knowledge — `memo knowledge …`**
 
@@ -20,3 +21,4 @@ description: Resume work with the local Memo journal; brief your field from a se
 - `memo knowledge recall "<query>" [--topic t] [--status s]` / `--fuzzy` — search cards
 - `memo knowledge recall --semantic "…"` — meaning-based; builds the index as needed
 - `memo knowledge show <name>` — read one card
+- `memo knowledge index` — pre-build the semantic index (maintained automatically otherwise)

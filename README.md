@@ -11,7 +11,7 @@ A journal that compresses itself, and a brief over what your field knows.
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776ab?logo=python&logoColor=white)](https://www.python.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)](#)
 [![Deps](https://img.shields.io/badge/deps-stdlib%20only-2f9e44)](#design-guarantees)
-[![Tests](https://img.shields.io/badge/tests-11%2F11-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-15%2F15-brightgreen)](#development)
 
 </div>
 
@@ -203,7 +203,7 @@ Default journal tags: `change`, `decision`, `blocker`, `testing`. Size limits (`
 python3 -m pip install sentence-transformers
 ```
 
-After that, **the index takes care of itself**: `memo memory note` returns immediately — a short-lived background run embeds the new entry, so writes never wait for a model. Any `recall --semantic` completes the index synchronously before searching; only the first search after the install pays the full build. The explicit `index` commands remain for pre-building and `--status` / `--rebuild`.
+After that, **the index takes care of itself**: `memo memory note` returns immediately — a short-lived background run embeds the new entry, so writes never wait for a model. Any `recall --semantic` completes the index synchronously before searching; only the first search after the install pays the full build. The explicit `index` commands remain for pre-building and `--status` / `--rebuild`. Set `MEMO_SYNC_INDEX=1` to index inline instead (tests, constrained environments).
 
 Without the library, journals simply skip indexing and nothing fails; regex and fuzzy search need no model. Encodes text locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights may download on first use). The knowledge index is built **per chunk**: each title-prefixed paragraph of a card gets its own vector, so a hit points at the paragraph that matched — and bodies longer than the model window still work.
 
@@ -221,7 +221,7 @@ Without the library, journals simply skip indexing and nothing fails; regex and 
 python3 -m unittest discover -s tests -v
 ```
 
-Eleven tests exercise the CLI end-to-end in temporary folders: journal scope resolution, concurrent dedup, full-history wake coverage with originals intact, hierarchical summaries, byte limits, the optional-index contract — and knowledge discovery, field-filtered briefs, filtered and fuzzy card search, card printing and the semantic-index contract. No network, no model weights, no real journals.
+Fifteen tests exercise the CLI end-to-end in temporary folders: journal scope resolution, concurrent dedup, full-history wake coverage with originals intact, hierarchical summaries, byte limits, the optional-index contract, note auto-indexing (inline and in the background, via a deterministic `MEMO_EMBED_STUB` test hook) — and knowledge vault selection, field-filtered briefs, filtered and fuzzy card search, card printing, and the semantic auto-build. No network, no model weights, no real journals.
 
 ## Journals from other tools
 
