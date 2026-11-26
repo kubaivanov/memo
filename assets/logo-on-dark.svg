@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Memo">
+  <rect width="128" height="128" rx="30" fill="#1d4ed8"/>
+  <path d="M32 42h64M32 64h46" fill="none" stroke="#dce6fb" stroke-width="9" stroke-linecap="round"/>
+  <path d="M32 86h28" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
+</svg>

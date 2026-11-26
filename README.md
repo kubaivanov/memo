@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="assets/logo.svg" width="118" height="118" alt="Memo logo">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/banner-on-dark.svg">
+  <img src="assets/banner.png" alt="Memo">
+</picture>
 
 # Memo
 
