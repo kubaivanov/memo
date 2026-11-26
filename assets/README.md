@@ -11,6 +11,7 @@ specific machine.
 | `banner.png` / `banner.svg` | README header, 1280×280. SVG is the source, PNG the export. |
 | `banner-on-dark.png` / `.svg` | The same header for dark mode, transparent background. |
 | `social-preview.png` | GitHub social preview, 1280×640 — upload it in Settings → Social preview. |
+| `demo.gif` | README demo, 1280×720: two new sessions, one with `memo memory wake`. |
 | `logo-512.png` | Repository avatar (GitHub keeps avatars as an upload, not a file). |
 | `logo-180.png`, `logo-32.png` | Apple touch icon and favicon, for docs pages or any site showing Memo. |
 

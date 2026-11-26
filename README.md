@@ -14,7 +14,11 @@ A journal that compresses itself, and a brief over what your field knows.
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776ab?logo=python&logoColor=white)](https://www.python.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)](#)
 [![Deps](https://img.shields.io/badge/deps-stdlib%20only-2f9e44)](#design-guarantees)
-[![Tests](https://img.shields.io/badge/tests-15%2F15-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-16%2F16-brightgreen)](#development)
+
+<img src="assets/demo.gif" width="880" alt="Two new sessions with the same question: without memo the agent has no context, with memo it calls memo memory wake and answers from the journal.">
+
+<sub>Same question, two new sessions. Left: no journal. Right: <code>memo memory wake</code>.</sub>
 
 </div>
 
@@ -244,7 +248,7 @@ Without a runtime installed, journals simply skip indexing and nothing fails; re
 python3 -m unittest discover -s tests -v
 ```
 
-Fifteen tests exercise the CLI end-to-end in temporary folders: journal scope resolution, concurrent dedup, full-history wake coverage with originals intact, hierarchical summaries, byte limits, the optional-index contract, note auto-indexing (inline and in the background, via a deterministic `MEMO_EMBED_STUB` test hook) — and knowledge vault selection, field-filtered briefs, filtered and fuzzy card search, card printing, and the semantic auto-build. No network, no model weights, no real journals.
+Sixteen tests exercise the CLI end-to-end in temporary folders: journal scope resolution, concurrent dedup, full-history wake coverage with originals intact, hierarchical summaries, byte limits, the optional-index contract, note auto-indexing (inline and in the background, via a deterministic `MEMO_EMBED_STUB` test hook) — and knowledge vault selection, field-filtered briefs, filtered and fuzzy card search, card printing, and the semantic auto-build. No network, no model weights, no real journals.
 
 ## Journals from other tools
 
