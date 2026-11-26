@@ -199,21 +199,33 @@ Default journal tags: `change`, `decision`, `blocker`, `testing`. Size limits (`
 
 ## Optional semantic search
 
+Two runtimes; pick one. The index behaves the same either way — vectors are bit-compatible.
+
+**ONNX (recommended)** — `onnxruntime` and `tokenizers` import in a blink and the session loads in about a second, so a semantic search lands in low single-digit seconds:
+
+```sh
+python3 -m pip install onnxruntime tokenizers
+# one-time model export (needs torch + transformers available once):
+python -m examples.export_onnx   # ← see docs note below
+```
+
+Export = `torch.onnx.export` of the model (inputs `input_ids`, `attention_mask`; output `last_hidden_state`; dynamic batch/seq axes, opset 17), and `tokenizer.json` copied from the model's HF cache into the same folder. Then:
+
+```json
+{ "knowledge_dir": "~/0-KNOWLEDGE", "embed_onnx": "~/.local/share/memo/models/minilm-multilingual" }
+```
+
+**torch + transformers (no export, heavier imports)** — works out of the box:
+
 ```sh
 python3 -m pip install torch transformers
 ```
 
+If your default Python imports it slowly (Apple's CLT Python does), point `embed_python` at a build that doesn't and Memo re-executes into it once per command. An embedding-free installation never needs either knob — they only matter once semantic search is installed.
+
 After that, **the index takes care of itself**: `memo memory note` returns immediately — a short-lived background run embeds the new entry, so writes never wait for a model. Any `recall --semantic` completes the index synchronously before searching; only the first search after the install pays the full build. The explicit `index` commands remain for pre-building and `--status` / `--rebuild`. Set `MEMO_SYNC_INDEX=1` to index inline instead (tests, constrained environments).
 
-Without the library, journals simply skip indexing and nothing fails; regex and fuzzy search need no model. Encodes text locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights may download on first use). The knowledge index is built **per chunk**: each title-prefixed paragraph of a card gets its own vector, so a hit points at the paragraph that matched — and bodies longer than the model window still work.
-
-If your default Python imports torch slowly (Apple's CLT Python does), point `embed_python` at a build that doesn't and Memo re-executes into it once per command:
-
-```json
-{ "knowledge_dir": "~/0-KNOWLEDGE", "embed_python": "~/.local/share/memo/embed-venv/bin/python" }
-````
-
-An embedding-free installation never needs `embed_python` — the knob only matters once semantic search is installed.
+Without a runtime installed, journals simply skip indexing and nothing fails; regex and fuzzy search need no model. Encodes text locally with `paraphrase-multilingual-MiniLM-L12-v2`. The knowledge index is built **per chunk**: each title-prefixed paragraph of a card gets its own vector, so a hit points at the paragraph that matched — and bodies longer than the model window still work.
 
 ## Design guarantees
 

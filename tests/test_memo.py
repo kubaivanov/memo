@@ -102,17 +102,27 @@ class MemoTests(unittest.TestCase):
                       self.call("memory", "note", "--subject", "test", "ě" * 140, code=1))
 
     def test_journal_semantic_without_library(self):
-        # force the "library missing" path even when sentence-transformers
+        # force the "library missing" path even when a semantic stack
         # happens to be installed on this machine
         blocker = self.bot / "no-semantic"
         blocker.mkdir(exist_ok=True)
         (blocker / "torch.py").write_text(
             "raise ImportError('blocked for this test')\n", encoding="utf-8")
-        env = {"PYTHONPATH": str(blocker)}
+        env = {"PYTHONPATH": str(blocker), "MEMO_CONFIG": "/nonexistent",
+               "MEMO_EMBED_ONNX": "", "MEMO_EMBED_PYTHON": ""}
         self.call("memory", "note", "test", env=env)
         self.assertIn("Indexed 0/1", self.call("memory", "index", "--status", env=env))
         self.assertIn("semantic search requires",
                       self.call("memory", "recall", "--semantic", "test",
+                                env=env, code=1))
+
+    def test_journal_onnx_config_missing_model(self):
+        empty = self.bot / "empty-onnx"
+        empty.mkdir()
+        env = {"MEMO_CONFIG": "/nonexistent", "MEMO_EMBED_ONNX": str(empty)}
+        self.call("memory", "note", "probe", env=env)
+        self.assertIn("embed_onnx needs model.onnx",
+                      self.call("memory", "recall", "--semantic", "probe",
                                 env=env, code=1))
 
     def test_journal_note_auto_indexes(self):

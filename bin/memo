@@ -47,21 +47,24 @@ def config_path():
                  or Path.home() / ".config" / "memo" / "config.json")
 
 
+def config_get(key):
+    path = config_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data.get(key)
+
+
 def embed_python():
     """An interpreter with the ML stack, from MEMO_EMBED_PYTHON or the
     config file's embed_python. Fast torch imports live in a managed
     build; the shebang python stays the thin, dependency-free default."""
     override = os.environ.get("MEMO_EMBED_PYTHON")
-    if override:
-        return Path(override)
-    path = config_path()
-    if path.is_file():
-        try:
-            chosen = json.loads(path.read_text(encoding="utf-8")).get("embed_python")
-        except (json.JSONDecodeError, OSError):
-            return None
-        return Path(chosen) if chosen else None
-    return None
+    return Path(override) if override else (
+        Path(config_get("embed_python")) if config_get("embed_python") else None)
 
 
 def reexec_for_embeddings():
@@ -156,6 +159,53 @@ def _new_embedder():
     return encode
 
 
+def _onnx_embedder(folder):
+    """The exported model as an encoder. onnxruntime + tokenizers import in
+    well under a second and the session loads in a few more — semantic
+    search without torch's seconds of imports and model loading."""
+    try:
+        import numpy
+        import onnxruntime as ort
+        from tokenizers import Tokenizer
+    except ImportError:
+        raise ValueError("embed_onnx is set; semantic search requires: "
+                         "python3 -m pip install onnxruntime tokenizers")
+    model_file = folder / "model.onnx"
+    tokenizer_file = folder / "tokenizer.json"
+    if not model_file.is_file() or not tokenizer_file.is_file():
+        raise ValueError(f"embed_onnx needs model.onnx and tokenizer.json "
+                         f"in {folder}")
+    tokenizer = Tokenizer.from_file(str(tokenizer_file))
+    tokenizer.enable_truncation(max_length=128)
+    tokenizer.enable_padding()
+    session = ort.InferenceSession(str(model_file), providers=["CPUExecutionProvider"])
+    names = {item.name for item in session.get_inputs()}
+
+    def encode(texts):
+        encodings = tokenizer.encode_batch(texts)
+        feed = {}
+        if "input_ids" in names:
+            feed["input_ids"] = numpy.array([e.ids for e in encodings],
+                                            dtype=numpy.int64)
+        if "attention_mask" in names:
+            feed["attention_mask"] = numpy.array([e.attention_mask for e in encodings],
+                                                  dtype=numpy.int64)
+        if "token_type_ids" in names:
+            feed["token_type_ids"] = numpy.array([e.type_ids for e in encodings],
+                                                  dtype=numpy.int64)
+        hidden = numpy.asarray(session.run(None, feed)[0])
+        mask = feed.get("attention_mask")
+        if mask is None:
+            pooled = hidden.mean(axis=1)
+        else:
+            weight = mask[:, :, None].astype(hidden.dtype)
+            pooled = (hidden * weight).sum(axis=1) / numpy.maximum(weight.sum(axis=1), 1e-9)
+        norms = numpy.linalg.norm(pooled, axis=1, keepdims=True)
+        return (pooled / numpy.maximum(norms, 1e-12)).tolist()
+
+    return encode
+
+
 def embed(texts):
     if os.environ.get("MEMO_EMBED_STUB"):
         # Test hook: deterministic bag-of-bigrams vectors, no model weights.
@@ -172,7 +222,13 @@ def embed(texts):
     # meaning never pays for it.
     global _EMBEDDER
     if _EMBEDDER is None:
-        _EMBEDDER = _new_embedder()
+        onnx_dir = os.environ.get("MEMO_EMBED_ONNX")
+        if not onnx_dir:
+            onnx_dir = config_get("embed_onnx")
+        if onnx_dir:
+            _EMBEDDER = _onnx_embedder(Path(onnx_dir).expanduser())
+        else:
+            _EMBEDDER = _new_embedder()
     return _EMBEDDER(texts)
 
 
