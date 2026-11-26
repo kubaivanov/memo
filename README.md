@@ -179,7 +179,7 @@ A minimal drop-in instruction for your agent lives in [`skill/SKILL.md`](skill/S
 | `memo memory note [--subject s] [--tag t] [--date d] "line"` | Append one memory; duplicate-checked. |
 | `memo memory compress [<range> "<summary>"]` | Show the next compression job, or store a summary. |
 | `memo memory recall "regex" [-n 20] [--since 7d] [--subject s]` | Search the journal; shows later corrections. |
-| `memo memory recall --fuzzy "…" / --semantic "…"` | Typo-tolerant / meaning-based journal search. |
+| `memo memory recall --fuzzy "…" / --semantic "…"` | Typo-tolerant / meaning-based search; `--semantic` builds the index as needed. |
 | `memo memory show <id \| lo-hi>` | One entry (or block) plus later references. |
 | `memo memory amend <id> "correction"` / `retract <id> "reason"` | Append corrections; history is never rewritten. |
 | `memo memory expand <lo-hi>` / `drop-summary <lo-hi>` | Open a summary into its halves / discard a derived summary. |
@@ -191,7 +191,7 @@ A minimal drop-in instruction for your agent lives in [`skill/SKILL.md`](skill/S
 | --- | --- |
 | `memo knowledge wake [topics…] [--dir v]` | One field brief, assembled from vault frontmatter. |
 | `memo knowledge recall "regex" [--topic t] [--status s] [-n]` | Search cards by words and filters. |
-| `memo knowledge recall --fuzzy "…" / --semantic "…"` | Typo-tolerant / meaning-based card search. |
+| `memo knowledge recall --fuzzy "…" / --semantic "…"` | Typo-tolerant / meaning-based card search; `--semantic` builds the index as needed. |
 | `memo knowledge show <name> [--dir v]` | Print one card: metadata plus body, without the YAML. |
 | `memo knowledge index [-status \| --rebuild] [--dir v]` | Build the chunked semantic index (`.knowledge/`). |
 
@@ -201,11 +201,11 @@ Default journal tags: `change`, `decision`, `blocker`, `testing`. Size limits (`
 
 ```sh
 python3 -m pip install sentence-transformers
-memo memory index                        # journal entries
-memo knowledge index --dir ~/vault       # knowledge chunks
 ```
 
-Encodes text locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights may download on first use). `recall` never builds an index as a side effect: if data is newer than the index, it says so and you re-index. Regex and fuzzy search work without the model — the core tool stays dependency-free.
+After that, **the index takes care of itself**: `memo memory note` embeds new entries as they are written, and any `recall --semantic` builds or extends the index before searching — first use pays the one-time build. Regex and fuzzy search work without the model; when the library is missing, the journal simply skips indexing and nothing fails. The explicit `index` commands remain for pre-building and `--status` / `--rebuild`.
+
+Encodes text locally with `paraphrase-multilingual-MiniLM-L12-v2` (weights may download on first use). The knowledge index is built **per chunk**: each title-prefixed paragraph of a card gets its own vector, so a hit points at the paragraph that matched — and bodies longer than the model window still work.
 
 ## Design guarantees
 

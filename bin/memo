@@ -28,6 +28,7 @@ import re
 import sys
 import tempfile
 import unicodedata
+import zlib
 
 
 MAX_BYTES = 280
@@ -87,6 +88,17 @@ def folded(text):
 
 
 def embed(texts):
+    if os.environ.get("MEMO_EMBED_STUB"):
+        # Test hook: deterministic bag-of-bigrams vectors, no model weights.
+        vectors = []
+        for text in texts:
+            vector = [0.0] * 64
+            flat = folded(text)
+            for i in range(len(flat) - 1):
+                vector[zlib.crc32(flat[i:i + 2].encode()) % 64] = 1.0
+            norm = sum(value * value for value in vector) ** 0.5 or 1.0
+            vectors.append([value / norm for value in vector])
+        return vectors
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError:
@@ -261,6 +273,18 @@ def read_index(store):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
+def extend_index(store, entries):
+    """Index the journal: build when missing, extend with new entries
+    otherwise. Returns how many entries were embedded."""
+    vectors = read_index(store) or []
+    missing = entries[len(vectors):]
+    if not missing:
+        return 0
+    vectors += embed([entry["text"] for entry in missing])
+    atomic_json(store / "index.json", vectors)
+    return len(missing)
+
+
 def recall(store, entries, args):
     since, until = (when(v) if v else None for v in (args.since or args.on, args.until or args.on))
     candidates = [entry for entry in entries
@@ -271,11 +295,12 @@ def recall(store, entries, args):
     warning = None
     if args.semantic:
         vectors = read_index(store)
-        if not vectors:
-            raise ValueError("no semantic index; run memo memory index")
-        missing = len(entries) - len(vectors)
+        missing = entries[len(vectors):] if vectors else entries
         if missing:
-            warning = f"{missing} entries newer than the index; run memo memory index."
+            vectors = (vectors or []) + embed([entry["text"] for entry in missing])
+            atomic_json(store / "index.json", vectors)
+            hint = "entries" if len(missing) > 1 else "entry"
+            print(f"Indexed {len(missing)} {hint}; index current.")
         candidates = [entry for entry in candidates if entry["id"] < len(vectors)]
         if candidates:
             query = embed([args.query])[0]
@@ -377,6 +402,13 @@ def journal_operate(store, entries, args):
                 return 0
         append(store, entries, stamp, text)
         request_summary(store, entries, pending(store, len(entries)))
+        try:
+            fresh = extend_index(store, entries)
+            if fresh:
+                print(f"Indexed {fresh} new; index current.")
+        except ValueError:
+            if read_index(store) is not None:
+                print("Index not refreshed: semantic deps missing.")
     elif cmd == "compress":
         jobs = pending(store, len(entries))
         if args.range is not None or args.text is not None:
@@ -580,37 +612,31 @@ def kn_recall(vault, args):
     if args.limit < 1 or ((args.semantic or args.fuzzy) and not args.query):
         raise ValueError("use a positive result limit and a nonempty fuzzy/semantic query")
     cards = kn_filter(load_cards(vault), args)
-    warning = None
     if args.semantic:
-        index = kn_index_read(vault)
-        if not index:
-            raise ValueError("no semantic index; run memo knowledge index")
-        if index["cards"] != len(load_cards(vault)):
-            warning = "cards changed since the index; run memo knowledge index"
-        names = {c["name"] for c in cards}
+        index, embedded = kn_refresh(vault)
+        if embedded:
+            print(f"Indexed {embedded} chunk{'s' if embedded != 1 else ''}; index current.")
+        names = {card["name"] for card in cards}
+        query = embed([args.query])[0]
         scored = sorted(((cosine(query, vector), chunk) for vector, chunk
                          in zip(index["vectors"], index["chunks"])
                          if chunk["card"] in names),
                         key=lambda item: (-item[0], item[1]["card"]))
-        if scored:
-            query = embed([args.query])[0]
-            best, seen = [], set()
-            for score, chunk in scored:
-                if chunk["card"] not in seen:
-                    seen.add(chunk["card"])
-                    best.append((score, chunk))
-                if len(best) >= args.limit:
-                    break
-            by_name = {c["name"]: c for c in cards}
-            for score, chunk in best:
-                card = by_name[chunk["card"]]
-                tags = ", ".join(card["topics"]) or "no topics"
-                print(f"{card['name']} ({card['status']}, {card['captured']}) "
-                      f"[{tags}] -- {score:.2f}")
-                print("  " + " ".join(chunk["text"].split("\n", 1)[1].split())[:160])
-            print(f"{len(seen)} card(s), ranked by meaning." if seen else "No card.")
-        else:
-            print("No card.")
+        best, seen = [], set()
+        for score, chunk in scored:
+            if chunk["card"] not in seen:
+                seen.add(chunk["card"])
+                best.append((score, chunk))
+            if len(best) >= args.limit:
+                break
+        by_name = {card["name"]: card for card in cards}
+        for score, chunk in best:
+            card = by_name[chunk["card"]]
+            tags = ", ".join(card["topics"]) or "no topics"
+            print(f"{card['name']} ({card['status']}, {card['captured']}) "
+                  f"[{tags}] -- {score:.2f}")
+            print("  " + " ".join(chunk["text"].split("\n", 1)[1].split())[:160])
+        print(f"{len(seen)} card(s), ranked by meaning." if seen else "No card.")
     else:
         if args.fuzzy:
             needle = folded(args.query)
@@ -637,8 +663,6 @@ def kn_recall(vault, args):
             print(f"{card['name']} ({card['status']}, {card['captured']}) "
                   f"[{tags}] {card['title']}")
         print(f"{len(cards)} card(s)." if cards else "No card.")
-    if warning:
-        print(warning)
     return 0
 
 
@@ -668,8 +692,27 @@ def kn_show(vault, args):
     return 0
 
 
-def kn_index(vault, args):
+def kn_refresh(vault, rebuild=False):
+    """Ensure the chunk index covers every card; returns (index, embedded)."""
     cards = load_cards(vault)
+    old = None if rebuild else kn_index_read(vault)
+    done = {chunk["card"] for chunk in old["chunks"]} if old else set()
+    fresh = [chunk for card in cards if card["name"] not in done
+             for chunk in kn_chunks(card)]
+    if old and not fresh:
+        return old, 0
+    vectors = embed([chunk["text"] for chunk in fresh])
+    index = {
+        "cards": len(cards),
+        "chunks": (old["chunks"] if old else []) + fresh,
+        "vectors": (old["vectors"] if old else []) + vectors,
+    }
+    (vault / ".knowledge").mkdir(exist_ok=True)
+    atomic_json(kn_index_path(vault), index)
+    return index, len(fresh)
+
+
+def kn_index(vault, args):
     if args.status:
         index = kn_index_read(vault)
         if index:
@@ -677,21 +720,7 @@ def kn_index(vault, args):
         else:
             print("No semantic index. Run: memo knowledge index")
         return 0
-    old = None if args.rebuild else kn_index_read(vault)
-    done = {chunk["card"] for chunk in old["chunks"]} if old else set()
-    fresh = [chunk for card in cards if card["name"] not in done for chunk in kn_chunks(card)]
-    if old and not fresh and old["cards"] == len(cards):
-        print(f"Indexed {len(cards)} cards, {len(old['chunks'])} chunks (up to date).")
-        return 0
-    vectors = embed([chunk["text"] for chunk in fresh])
-    chunks = (old["chunks"] if old else []) + fresh
-    index = {
-        "cards": len(cards),
-        "chunks": chunks,
-        "vectors": (old["vectors"] if old else []) + vectors,
-    }
-    (vault / ".knowledge").mkdir(exist_ok=True)
-    atomic_json(kn_index_path(vault), index)
+    index, _ = kn_refresh(vault, rebuild=args.rebuild)
     print(f"Indexed {index['cards']} cards, {len(index['chunks'])} chunks "
           f"(start-of-command snapshot).")
     return 0

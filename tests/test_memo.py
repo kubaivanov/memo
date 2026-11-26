@@ -19,10 +19,11 @@ class MemoTests(unittest.TestCase):
         self.bot = Path(temp.name)
         self.call("memory", "init")
 
-    def call(self, *args, cwd=None, code=0):
+    def call(self, *args, cwd=None, code=0, env=None):
         result = subprocess.run([sys.executable, str(CLI), *args],
                                 cwd=cwd or self.bot, capture_output=True,
-                                text=True, timeout=10)
+                                text=True, timeout=10,
+                                env={**os.environ, **(env or {})})
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
         return result.stdout + result.stderr
 
@@ -99,11 +100,23 @@ class MemoTests(unittest.TestCase):
         self.assertIn("280 UTF-8 bytes",
                       self.call("memory", "note", "--subject", "test", "ě" * 140, code=1))
 
-    def test_journal_missing_optional_index(self):
+    def test_journal_semantic_without_library(self):
         self.call("memory", "note", "test")
         self.assertIn("Indexed 0/1", self.call("memory", "index", "--status"))
-        self.assertIn("no semantic index",
+        self.assertIn("semantic search requires",
                       self.call("memory", "recall", "--semantic", "test", code=1))
+
+    def test_journal_note_auto_indexes(self):
+        stub = {"MEMO_EMBED_STUB": "1"}
+        self.call("memory", "note", "deployed budget 500", env=stub)
+        self.assertIn("Indexed 1/1", self.call("memory", "index", "--status", env=stub))
+        self.assertIn("Indexed 1 new; index current.",
+                      self.call("memory", "note", "second change", env=stub))
+        self.assertIn("Indexed 2/2", self.call("memory", "index", "--status", env=stub))
+        (self.bot / ".memory" / "index.json").unlink()
+        out = self.call("memory", "recall", "--semantic", "budget", env=stub)
+        self.assertIn("Indexed 2 entries; index current.", out)
+        self.assertIn("deployed budget 500", out)
 
 
 class KnowledgeTests(unittest.TestCase):
@@ -206,14 +219,22 @@ class KnowledgeTests(unittest.TestCase):
 
     def test_semantic_contract_without_index(self):
         env = {"KNOWLEDGE_DIR": str(self.vault)}
-        self.assertIn("no semantic index",
-                      self.call("knowledge", "recall", "--semantic", "resellers",
-                                env=env, code=1))
-        self.assertIn("No semantic index",
-                      self.call("knowledge", "index", "--status", env=env))
         self.assertIn("not a knowledge vault",
                       self.call("knowledge", "wake", "--dir", self.bot / "nowhere",
                                 code=1))
+        self.assertIn("No semantic index",
+                      self.call("knowledge", "index", "--status", env=env))
+
+    def test_knowledge_semantic_auto_builds(self):
+        env = {"KNOWLEDGE_DIR": str(self.vault), "MEMO_EMBED_STUB": "1"}
+        out = self.call("knowledge", "recall", "--semantic", "reseller", env=env)
+        self.assertIn("; index current.", out)
+        self.assertIn("openai--chatgpt-ads-44", out)
+        self.assertIn("ranked by meaning.", out)
+        self.assertTrue((self.vault / ".knowledge" / "index.json").is_file())
+        again = self.call("knowledge", "recall", "--semantic", "reseller", env=env)
+        self.assertNotIn("Indexed", again)
+        self.assertIn("openai--chatgpt-ads-44", again)
 
 
 if __name__ == "__main__":
