@@ -42,6 +42,46 @@ TAGS = {"change", "decision", "blocker", "testing"}
 REFERENCE = re.compile(r"^(Amends|Retracts) #(\d+)(?:-(\d+))?: ")
 
 
+def config_path():
+    return Path(os.environ.get("MEMO_CONFIG")
+                 or Path.home() / ".config" / "memo" / "config.json")
+
+
+def embed_python():
+    """An interpreter with the ML stack, from MEMO_EMBED_PYTHON or the
+    config file's embed_python. Fast torch imports live in a managed
+    build; the shebang python stays the thin, dependency-free default."""
+    override = os.environ.get("MEMO_EMBED_PYTHON")
+    if override:
+        return Path(override)
+    path = config_path()
+    if path.is_file():
+        try:
+            chosen = json.loads(path.read_text(encoding="utf-8")).get("embed_python")
+        except (json.JSONDecodeError, OSError):
+            return None
+        return Path(chosen) if chosen else None
+    return None
+
+
+def reexec_for_embeddings():
+    """Move the whole command to `embed_python` once, before doing work.
+    Keeps one architecture (in-process imports) while letting a machine
+    point at a Python build that imports torch in seconds, not tens."""
+    target = embed_python()
+    if not target:
+        return
+    try:
+        if os.path.samefile(sys.executable, target):
+            return
+    except OSError:
+        return
+    if not target.is_file():
+        print(f"memo: embed_python not found: {target}", file=sys.stderr)
+        return
+    os.execv(target, [str(target), os.path.abspath(__file__)] + sys.argv[1:])
+
+
 # --------------------------------------------------------------- shared
 
 def root(cwd):
@@ -88,6 +128,34 @@ def folded(text):
                    if not unicodedata.combining(c))
 
 
+_EMBEDDER = None
+
+
+def _new_embedder():
+    """Encode with the model directly: torch + transformers, mean pooling,
+    L2-normalized — the same vectors sentence-transformers produces, minus
+    its ~7 s of import overhead (sklearn and friends it never uses here)."""
+    try:
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+    except ImportError:
+        raise ValueError("semantic search requires: python3 -m pip install torch transformers")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL)
+    model = AutoModel.from_pretrained(MODEL)
+    model.eval()
+
+    def encode(texts):
+        with torch.no_grad():
+            batch = tokenizer(texts, padding=True, truncation=True,
+                              max_length=128, return_tensors="pt")
+            hidden = model(**batch).last_hidden_state
+            mask = batch["attention_mask"].unsqueeze(-1).to(hidden.dtype)
+            pooled = (hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
+            return torch.nn.functional.normalize(pooled, p=2, dim=1).tolist()
+
+    return encode
+
+
 def embed(texts):
     if os.environ.get("MEMO_EMBED_STUB"):
         # Test hook: deterministic bag-of-bigrams vectors, no model weights.
@@ -100,12 +168,12 @@ def embed(texts):
             norm = sum(value * value for value in vector) ** 0.5 or 1.0
             vectors.append([value / norm for value in vector])
         return vectors
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError:
-        raise ValueError("semantic search requires: python3 -m pip install sentence-transformers")
-    # Model weights may be downloaded on first use; text is encoded locally.
-    return SentenceTransformer(MODEL).encode(texts, normalize_embeddings=True).tolist()
+    # The model is loaded once per process; a command that never searches
+    # meaning never pays for it.
+    global _EMBEDDER
+    if _EMBEDDER is None:
+        _EMBEDDER = _new_embedder()
+    return _EMBEDDER(texts)
 
 
 def cosine(query, vector):
@@ -509,8 +577,7 @@ def vault_locate(explicit=None):
                           ("KNOWLEDGE_DIR", os.environ.get("KNOWLEDGE_DIR"))):
         if value:
             return vault_check(Path(value).expanduser().resolve(), origin)
-    config = Path(os.environ.get("MEMO_CONFIG")
-                  or Path.home() / ".config" / "memo" / "config.json")
+    config = config_path()
     if config.is_file():
         try:
             chosen = json.loads(config.read_text(encoding="utf-8")).get("knowledge_dir")
@@ -834,6 +901,7 @@ def run(args):
 
 if __name__ == "__main__":
     try:
+        reexec_for_embeddings()
         sys.exit(run(parser().parse_args()))
     except (OSError, ValueError, re.error) as error:
         print(f"memo: {error}", file=sys.stderr)

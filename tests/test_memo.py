@@ -106,7 +106,7 @@ class MemoTests(unittest.TestCase):
         # happens to be installed on this machine
         blocker = self.bot / "no-semantic"
         blocker.mkdir(exist_ok=True)
-        (blocker / "sentence_transformers.py").write_text(
+        (blocker / "torch.py").write_text(
             "raise ImportError('blocked for this test')\n", encoding="utf-8")
         env = {"PYTHONPATH": str(blocker)}
         self.call("memory", "note", "test", env=env)
