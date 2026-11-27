@@ -33,6 +33,8 @@ Memo gives each agent two stores, next to its work:
 
 No daemon, no IDE plugin, no external service. One file of Python from the standard library.
 
+**Setting this up for your own agents?** Start with the installer skill — [`install/SKILL.md`](install/SKILL.md): it asks for your knowledge vault and agent folders, and writes the rules into their instructions. The [Install](#install) section summarizes the manual path.
+
 ## Memory: a journal that compresses itself
 
 `memo memory wake` on an ads agent's journal with 113 entries prints 32 lines and covers *all* of them:
