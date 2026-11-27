@@ -151,6 +151,19 @@ The loop that makes it work:
 
 Because agents write plain, dated lines as they work, week-old context costs one summary line — and your team can audit exactly what the agent believed when it acted.
 
+## Install
+
+A full setup on a machine with agents — CLI on PATH, vault selection, a journal per agent folder, and the rules written into the agents' instructions — is guided by the installer skill in [`install/SKILL.md`](install/SKILL.md). Manually it is three commands plus instructions:
+
+```sh
+cp bin/memo ~/.local/bin/ && chmod +x ~/.local/bin/memo      # 1. CLI on PATH
+mkdir -p ~/.config/memo
+printf '{"knowledge_dir": "~/0-KNOWLEDGE"}' > ~/.config/memo/config.json   # 2. the chosen vault
+cd <agent-folder> && memo memory init                        # 3. one journal per agent
+```
+
+Then paste the `## Memo` rules and the agent's knowledge topics into its `AGENTS.md` — the installer skill holds both verbatim — and copy `skill/SKILL.md` into the agent's skills directory.
+
 ## Quick start
 
 Requires Python 3.9+ on macOS or Linux. Core commands use only the standard library.
