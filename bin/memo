@@ -657,10 +657,15 @@ def parse_note(text):
     if not match:
         return {}, text
     meta = {}
+    key = None
     for line in match.group(1).split("\n"):
         m = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", line)
         if m:
-            meta[m.group(1)] = m.group(2).strip()
+            key = m.group(1)
+            meta[key] = m.group(2).strip()
+        elif key is not None and re.match(r"^\s*-\s+", line):
+            item = line.strip()[1:].strip()
+            meta[key] = f"{meta[key]},{item}" if meta.get(key) else item
     return meta, match.group(2)
 
 

@@ -232,6 +232,19 @@ class KnowledgeTests(unittest.TestCase):
         out = self.call("knowledge", "recall", "", "--status", "read", "-n", "1", env=env)
         self.assertIn("(read", out)
 
+    def test_recall_block_list_frontmatter_topics(self):
+        # Obsidian's property editor can rewrite inline lists into block lists;
+        # the parser must read both or topic filters silently return nothing.
+        (self.vault / "sources" / "block--list-card.md").write_text(
+            "---\ntype: article\ntitle: \"Block list card\"\nstatus: read\n"
+            "captured: 2026-11-26\ntopics:\n  - \"[[ai-search]]\"\n  - \"[[ppc]]\"\n"
+            "---\n\n# Block list card\n\nBody text.\n", encoding="utf-8")
+        env = {"KNOWLEDGE_DIR": str(self.vault)}
+        out = self.call("knowledge", "recall", "", "--topic", "ai-search", env=env)
+        self.assertIn("block--list-card", out)
+        out = self.call("knowledge", "wake", "ai-search", env=env)
+        self.assertIn("block--list-card", out)
+
     def test_recall_fuzzy_survives_mangled_words(self):
         out = self.call("knowledge", "recall", "--fuzzy", "meet nod stanalone agent",
                         env={"KNOWLEDGE_DIR": str(self.vault)})
