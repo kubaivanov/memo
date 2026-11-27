@@ -133,6 +133,19 @@ vault/
 
 Both stores are folder-scoped: runs from a subfolder resolve to the same journal. The knowledge vault is whatever you selected — one machine, one vault, or a different `--dir` per call.
 
+## Why not the memory built into ChatGPT or Claude?
+
+Those memories are good at what they're for: personal context, zero setup, following you across the vendor's own apps. The difference shows up when agents do client work, and it is a difference of ownership rather than of quality.
+
+- **Your files, not their feature.** A journal is `.memory/entries.jsonl` in the project folder. Read it, `grep` it, `diff` it, commit it, open it in an editor. Nothing about the history hides behind a settings page or an export button that may not exist next year.
+- **Portable across vendors.** The same journal serves Claude Code in the morning, Codex or a local model in the afternoon. Switch models without losing what the team learned; provider memory stops at the provider's door.
+- **Scoped to the work, not the account.** The journal lives next to the campaign folder, so every agent working there sees it, whichever account it runs under. Account memory follows a person; this follows a project.
+- **Compression you control.** Summaries are written by your agent and stored as data you can inspect and rebuild — the rule is explicit: 280 bytes per line, ~32 rows per wake, originals never deleted. With provider memory, the decision about what is worth keeping belongs to the provider.
+- **Auditable.** Every entry carries its date and subject, and a correction is a new entry pointing at the old one. When someone asks what the agent believed when it moved a budget, you can show them the line.
+- **No service.** No account, no plan, no daemon: Python's standard library, offline, and nothing leaves the machine.
+
+Vendors are moving this way too — Claude's API already offers a file-based memory tool, and ChatGPT's memory is a summary the model maintains for you. Memo is that idea as a standalone CLI: one format, any model, plus the knowledge brief over your own sources.
+
 ## For PPC teams running agents
 
 One journal per agent, one folder per channel — and one shared vault of what the field knows:
