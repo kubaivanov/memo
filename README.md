@@ -11,14 +11,14 @@
 
 A journal that compresses itself, and a brief over what your field knows.
 
+<img src="assets/demo.gif" width="880" alt="Two new sessions with the same question: without memo the agent has no context, with memo it calls memo memory wake and answers from the journal.">
+
+<sub>Same question, two new sessions. Left: no journal. Right: <code>memo memory wake</code>.</sub>
+
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776ab?logo=python&logoColor=white)](https://www.python.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)](#)
 [![Deps](https://img.shields.io/badge/deps-stdlib%20only-2f9e44)](#design-guarantees)
 [![Tests](https://img.shields.io/badge/tests-16%2F16-brightgreen)](#development)
-
-<img src="assets/demo.gif" width="880" alt="Two new sessions with the same question: without memo the agent has no context, with memo it calls memo memory wake and answers from the journal.">
-
-<sub>Same question, two new sessions. Left: no journal. Right: <code>memo memory wake</code>.</sub>
 
 </div>
 
